@@ -563,25 +563,29 @@ Reader rules (`read_profile(path) -> TargetProfile`):
 ### 4.5 Check rules, specifications and the run context (phase 3)
 
 ```python
-class State(Enum): PASS, FAIL, NOT_EVALUATED, ERROR
+class State(Enum):
+    PASS, FAIL, NOT_EVALUATED, ERROR
+
 
 @dataclass(frozen=True)
 class CheckSpec:
-    id: str                 # stable, for example "gradient.slew.axis"
-    version: int            # changes when the rule changes
+    id: str  # stable, for example "gradient.slew.axis"
+    version: int  # changes when the rule changes
     title: str
-    quantity: str           # the quantity and its exact definition
-    inputs: tuple[str, ...] # the profile value paths that it needs
-    models: tuple[str, ...] # the model names that it needs
+    quantity: str  # the quantity and its exact definition
+    inputs: tuple[str, ...]  # the profile value paths that it needs
+    models: tuple[str, ...]  # the model names that it needs
     limit: str
     tolerance: str
     pass_condition: str
-    cost: str = "slow"      # "fast" or "slow" (decision 7)
+    cost: str = "slow"  # "fast" or "slow" (decision 7)
     pypulseq: str | None = None
     url: str | None = None  # a plugin gives its own; None for this package
 
+
 class CheckRule(Protocol):
     spec: CheckSpec
+
     def run(self, ctx: RunContext) -> Result: ...
 ```
 

@@ -5,14 +5,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# The project has no Python code yet. The PR that adds pyproject.toml adds its
-# checks here:
-#
-#   uv sync --frozen
-#   uv run ruff check .
-#   uv run ruff format --check .
-#   uv run pytest -q
+# pytest writes the IDs of the tests that it collects to this file, and the
+# TESTS.md check reads them, so the tests are collected only one time.
+collected_tests="$(mktemp)"
+trap 'rm -f "$collected_tests"' EXIT
 
+echo "# uv sync"
+uv sync --frozen
+
+echo
+echo "# ruff"
+uv run ruff check .
+uv run ruff format --check .
+
+echo
+echo "# pytest"
+# The tests argument loads tests/conftest.py before pytest reads its options,
+# so --collected-tests-file is known.
+uv run pytest -q tests --collected-tests-file "$collected_tests"
+
+echo
+echo "# TESTS.md"
+uv run python scripts/check_tests_md.py --collected "$collected_tests"
+
+echo
 echo "# shellcheck"
 shellcheck --severity=warning scripts/check .claude/hooks/block-main-writes.sh
 echo "ok    shellcheck"
