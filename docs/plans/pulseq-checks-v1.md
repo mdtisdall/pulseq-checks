@@ -115,9 +115,11 @@ decisions 3 to 12 and R1 to R7. The ones that this plan uses most:
    `synthetic.load_diagram_scale()` imports `scripts/diagram_scale.py` of
    pulseq-reports. That script imports the diagram card and the page, so it
    does not move. `test_seq_index.py` uses only its `build_repeating` and
-   `build_worst`. Lines 88 to 237 of `scripts/diagram_scale.py` (from the
+   `build_worst`. Lines 89 to 230 of `scripts/diagram_scale.py` (from the
    comment `Copied from tests/synthetic.py` to the end of `build_worst`)
-   import only `math`, `sys`, `numpy` and `pypulseq`.
+   use only `copy`, `math`, `sys`, `numpy` and `pypulseq`. (Corrected in
+   phase 1: the first version of this plan gave lines 88 to 237 and did not
+   name `copy`.)
 3. **The test helpers.** `tests/conftest.py` (71 lines): the
    `--collected-tests-file` option and the `write_gradient_asc` fixture.
    `tests/synthetic.py` (144 lines). `tests/oracles/grad_limits.py` (277
@@ -430,7 +432,7 @@ that edits the module corrects its text.
 |---|---|---|
 | `tests/conftest.py` | `tests/conftest.py` | None (phase 0 copies it) |
 | `tests/synthetic.py` | `tests/synthetic.py` | Remove `load_diagram_scale` and the imports that only it uses (`importlib.util`, `Path`) |
-| `scripts/diagram_scale.py`, lines 88 to 237 | `tests/scale_sequences.py` | New file: a module docstring that names the source, the imports that the lines use, then the lines with no change |
+| `scripts/diagram_scale.py`, lines 89 to 230 | `tests/scale_sequences.py` | New file: a module docstring that names the source, the imports that the lines use, then the lines with no change |
 | `tests/oracles/grad_limits.py` | `tests/oracles/grad_limits.py` | Imports only |
 | `tests/oracles/blocks.py` | `tests/oracles/blocks.py` | Imports only |
 | `scripts/check_tests_md.py` | `scripts/check_tests_md.py` | None (phase 0 copies it) |
