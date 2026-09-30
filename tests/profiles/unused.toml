@@ -1,0 +1,17 @@
+format = 1
+name = "Unused sections"
+
+[notes]
+author = "someone"
+
+[models.pns.safe]
+name = "test model"
+x = { a1 = 0.5 }
+y = { a1 = 0.6 }
+z = { a1 = 0.7 }
+
+[models.pns.other]
+value = 1
+
+[models.ge.pns]
+value = 2

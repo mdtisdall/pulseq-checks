@@ -1,0 +1,6 @@
+format = 1
+name = "Hz units"
+
+[opts]
+max_grad = 4257600.0      # 100 mT/m with the default unit Hz/m
+max_slew = 4257600000.0   # 100 T/m/s with the default unit Hz/m/s
