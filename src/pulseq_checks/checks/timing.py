@@ -93,7 +93,7 @@ class _Rasters:
             "rasters of the target when it reads the file. For such a file the check "
             "compares the rasters of the target with themselves and passes."
         ),
-        cost="slow",
+        cost="fast",
         pypulseq=None,
         url=None,
     )

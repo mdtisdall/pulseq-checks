@@ -259,7 +259,8 @@ def test_check_timing_does_not_change_the_sequence(tmp_path):
 def test_each_field_of_a_spec_is_set(rule):
     spec = rule.spec
     assert spec.version == 1
-    assert spec.cost == "slow"
+    # The cost classes of task 8.3 of the plan, from scripts/budget.py on 10^6 blocks.
+    assert spec.cost == {RASTERS: "fast", PYPULSEQ: "slow"}[rule]
     assert spec.url is None
     assert spec.models == ()
     for field in ("title", "quantity", "limit", "tolerance", "pass_condition"):

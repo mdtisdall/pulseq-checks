@@ -22,7 +22,7 @@ Peak gradient amplitude under any orientation
 
 **Version:** 1
 
-**Cost class:** slow
+**Cost class:** fast
 
 **Quantity:** The peak of |G| = sqrt(Gx^2 + Gy^2 + Gz^2) in mT/m over the file: the largest magnitude of the gradient vector of the three logical axes at the same time. A gradient event is piecewise linear between its corner points (the corners of a trapezoid; the first point, the samples and the last point of an arbitrary or an extended gradient). |G| is convex between the corner points of the three axes, so the maximum is at one of them. The amplitude is converted from Hz/m to mT/m with gamma = 42.576 MHz/T. The check covers the whole file, not windows of it. A scanner rotates the logical axes onto its physical axes for the orientation of the scan. The amplitude on a physical axis is at most |G| at each time, and it is equal to |G| when that axis points along the gradient vector. Thus |G| is the worst case of the amplitude on a physical axis under any rotation of the logical axes (decision 11 of the design). This check does not know the orientation of the scan, and it uses the one amplitude limit for each physical axis. Its location is the block ID and the time, in seconds from the start of the sequence, of the first point where the peak of |G| is reached.
 
@@ -44,7 +44,7 @@ Peak gradient amplitude of each logical axis
 
 **Version:** 1
 
-**Cost class:** slow
+**Cost class:** fast
 
 **Quantity:** For each logical axis x, y and z, the peak amplitude in mT/m: the largest absolute amplitude of any gradient event on that axis. A gradient event is piecewise linear between its corner points (the corners of a trapezoid; the first point, the samples and the last point of an arbitrary or an extended gradient). The maximum is at a corner point. The amplitude is converted from Hz/m to mT/m with gamma = 42.576 MHz/T. The check covers the whole file, not windows of it. The axes are the logical axes of the sequence, not the physical gradient axes of a scanner. The value of the result is the peak of the axis with the largest ratio of its peak to the limit. The limit is one number for all axes, so this is the axis with the largest peak (the first of x, y, z when two axes have the same peak). Its location is the block ID and the time, in seconds from the start of the sequence, of the first point where that peak is reached.
 
@@ -66,7 +66,7 @@ Peak gradient slew rate of each logical axis
 
 **Version:** 1
 
-**Cost class:** slow
+**Cost class:** fast
 
 **Quantity:** For each logical axis x, y and z, the peak slew rate in T/m/s: the largest of two kinds of value. (a) The slope of each straight segment of each gradient event, the change of the amplitude between two neighbouring corner points divided by the time between them (a segment shorter than 1 ns is not used). A gradient event is piecewise linear between its corner points (the corners of a trapezoid; the first point, the samples and the last point of an arbitrary or an extended gradient). (b) The step at each block junction divided by the gradient raster time of the sequence: the absolute difference between the last amplitude of the gradient of the previous block and the first amplitude of the gradient of this block. A block with no gradient on the axis counts as 0, and so does the value before the first block. Part (b) finds the step where a gradient does not start or end at 0, as with an extended trapezoid; pypulseq limits this step in add_block. The return to 0 after the last block is not a junction and is not counted. The slew is converted from Hz/m/s to T/m/s with gamma = 42.576 MHz/T. The check covers the whole file, not windows of it. The axes are the logical axes of the sequence, not the physical gradient axes of a scanner. The value of the result is the peak slew of the axis with the largest ratio of its peak slew to the limit. The limit is one number for all axes, so this is the axis with the largest peak slew (the first of x, y, z on a tie). Its location is the block ID and the time, in seconds from the start of the sequence, of the start of the steepest segment, or of the junction for a junction step (the block ID is then the block after the junction).
 
@@ -132,7 +132,7 @@ Rasters of the file against the rasters of the target
 
 **Version:** 1
 
-**Cost class:** slow
+**Cost class:** fast
 
 **Quantity:** For each of the four rasters GradientRasterTime, RadiofrequencyRasterTime, AdcRasterTime and BlockDurationRaster: F, the raster that the [DEFINITIONS] section of the .seq file declares, in seconds, and T, the raster of the target (rasters.<name> of the target profile). The deviation of a raster is |F/T - 1|. The result value is the F of the raster with the largest deviation (the first in the order above for equal deviations), in seconds. The reason of the result names that raster, with F and T.
 

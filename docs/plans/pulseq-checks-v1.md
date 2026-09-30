@@ -1106,6 +1106,30 @@ Checks:
 - [ ] `docs/checks.md` is up to date.
 - [ ] `scripts/check` passes.
 
+**Results of task 8.3** (2026-09-30, approved by the user). The machine: Apple
+M1 Max, macOS 26.6.2, Python 3.12.14, pypulseq 1.5.0.post1 (the fork pin).
+`scripts/budget.py`, 10^6 blocks (`build_repeating(200000)`), the median of
+three runs. Each time includes the one read of the `.seq` file (3.61 s); the
+build (9 s) and the write (14 s) are not part of it.
+
+| Check | Time (s) | Peak RSS (MB) | Cost class |
+|---|---|---|---|
+| read only | 3.61 | 573 | |
+| `timing.rasters` | 3.63 | 573 | fast |
+| `gradient.amplitude.axis` | 4.34 | 705 | fast |
+| `gradient.slew.axis` | 4.30 | 705 | fast |
+| `gradient.amplitude.any-orientation` | 4.38 | 705 | fast |
+| `pns.safe` | 14.14 | 624 | slow |
+| `timing.pypulseq` | 14.26 | 574 | slow |
+| all six checks | 24.82 | 710 | |
+| the fast checks (`fast_only=True`) | 4.19 | 736 | |
+
+- The budget of the fast checks together (decision 7): **10 s for 10^6
+  blocks on this machine, with the read of the file**. Measured: 4.19 s.
+- `tests/test_budget.py` (10^5 blocks, `fast_only=True`): 0.44 s locally.
+  The CI machine ran the test suite 2.5 times slower (3.15 s against
+  1.25 s), so about 1.1 s. `CI_BUDGET_S` = 3 x 1.1 s = 3.3 s.
+
 ---
 
 ### Phase 9: release 0.1.0rc1

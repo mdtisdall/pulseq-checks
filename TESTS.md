@@ -33,7 +33,8 @@ Contents:
    index, the raster sampler and the sequence extensions; the analyses (PNS and
    the PNS levels, and the gradient limits); the target profile, the results,
    the run function and the check configuration; the Siemens `.asc` profile
-   reader; the version 1 checks (timing, gradient and PNS); the command
+   reader; the version 1 checks (timing, gradient and PNS); the command; the
+   time budget
 
 ---
 
@@ -3781,14 +3782,14 @@ the shapes.
 
 #### `test_each_field_of_a_spec_is_set`
 
-**Checks:** The `CheckSpec` of each timing check has the version 1, the cost class
-`slow`, no URL, no models, a text in each of `title`, `quantity`, `limit`, `tolerance` and
+**Checks:** The `CheckSpec` of each timing check has the version 1, its cost class
+(`fast` for `timing.rasters`, `slow` for `timing.pypulseq`), no URL, no models, a text in each of `title`, `quantity`, `limit`, `tolerance` and
 `pass_condition`, and inputs with no duplicate.
 
 **How:** The test reads the fields of `RASTERS.spec` and `PYPULSEQ.spec`.
 
 **Assumptions:** The test does not check the content of the texts, only that they are not
-empty. The cost class `slow` is the value before the classes of phase 8.
+empty. The cost classes are the ones of task 8.3 of the plan, from `scripts/budget.py`.
 
 #### `test_the_ids_and_inputs_of_the_specs`
 
@@ -4061,7 +4062,7 @@ later pypulseq that stores a rotation in another way (see `refuse_rotations`).
 #### `test_the_spec_sets_each_field`
 
 **Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
-cost class `"slow"`, `url` None, no model, the expected input (`opts.max_slew` for the slew
+cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
 rule, `opts.max_grad` for the other two), and a non-empty title, quantity, limit,
 tolerance and pass condition.
 
@@ -4494,3 +4495,23 @@ loaded object.
 entry points (`uv sync --reinstall-package pulseq-checks`). The test does not run the
 script, and it does not check that the script uses the return value as the exit status: the
 wrapper that the build backend writes does that.
+
+### 2.17 Time budget (`test_budget.py`)
+
+#### `test_the_fast_checks_of_100000_blocks_are_within_the_ci_budget`
+
+**Checks:** The fast checks, run with `fast_only=True` on a repeating sequence of 100 000
+blocks, take at most `CI_BUDGET_S` seconds, and none of their results is "error".
+
+**How:** The test builds `build_repeating` of `scale_sequences.py` for 100 000 blocks,
+writes it to `tmp_path`, and writes a profile with the synthetic limits of
+`synthetic.SYSTEM` and the default rasters. It times `run_checks` (one read of the file and
+the fast checks) with `time.perf_counter`. The build and the write are not timed. The
+test also asserts that the fast checks ran (at least one result) and that no result is
+"error" or "not evaluated", so that a broken or skipped check does not look fast.
+
+**Assumptions:** The test finds a large slowdown only: `CI_BUDGET_S` has a large margin,
+which keeps the test stable on shared CI machines. It is not the budget of decision 7 of
+the plan: that budget is the measurement of `scripts/budget.py` on 10^6 blocks, made
+before each tag. The fast checks are the ones of task 8.3 (`timing.rasters` and the three
+gradient checks); the profile has no SAFE parameters because `pns.safe` is slow.

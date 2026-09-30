@@ -152,7 +152,7 @@ class _AmplitudeAxis(_GradientCheck):
             "Pass when the peak of each axis is at or below limit * (1 + 1e-9). Fail when the "
             "peak of any axis is above it. " + _NO_GRADIENTS + " " + _ROTATION
         ),
-        cost="slow",
+        cost="fast",
         pypulseq=None,
         url=None,
     )
@@ -211,7 +211,7 @@ class _SlewAxis(_GradientCheck):
             "Pass when the peak slew of each axis is at or below limit * (1 + 1e-9). Fail "
             "when the peak slew of any axis is above it. " + _NO_GRADIENTS + " " + _ROTATION
         ),
-        cost="slow",
+        cost="fast",
         pypulseq=None,
         url=None,
     )
@@ -268,7 +268,7 @@ class _AmplitudeAnyOrientation(_GradientCheck):
             + " "
             + _ROTATION
         ),
-        cost="slow",
+        cost="fast",
         pypulseq=None,
         url=None,
     )
