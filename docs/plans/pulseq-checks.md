@@ -3,9 +3,12 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: design. The user answered the open decisions on 2026-09-30 (section
-11). This is not an implementation plan. It gives the concepts, the structure
-and the decisions. An implementation plan comes next.
+Status: step 2 is done (2026-09-30). Version 1 is the release `0.1.0rc1`
+(tag `v0.1.0rc1`), made by the implementation plan
+`docs/plans/pulseq-checks-v1.md`, whose section 8 gives the results. The user
+answered the open decisions on 2026-09-30 (section 11); R6 was changed during
+the implementation. This document gives the concepts, the structure and the
+decisions.
 
 Source: this document is the part of the pulseq-reports design
 [`docs/plans/pulseq-checks.md`](https://github.com/mdtisdall/pulseq-reports/blob/8e66ea54eed9887ccc46662405e19a427c2b0d95/docs/plans/pulseq-checks.md)
@@ -591,13 +594,13 @@ repository has step 2 and a part of step 4.
 2. **Make `pulseq-checks`.**
    1. The dev-workflow setup. Done (#1).
    2. Move the measurement modules of section 7.2 with their tests, from
-      pulseq-reports `main`.
+      pulseq-reports `main`. Done (#10).
    3. Add the target profile, the profile reader, the check rules, the
-      results and `pulseq-check`.
+      results and `pulseq-check`. Done (#11 to #15, #17).
    4. Compare the results of the new timing, gradient and PNS checks with the
       current checks of the cards of pulseq-reports, before step 1 removes
-      them.
-   5. Make a tag that pulseq-reports can pin.
+      them. Done (#16, `docs/comparison.md`).
+   5. Make a tag that pulseq-reports can pin. `v0.1.0rc1`.
 3. **Step 3 of the source (in pulseq-reports).** pulseq-reports uses this
    package, removes its copies of the moved modules, exports `HardwareLimits`
    again, and adds the check summary card and `--fail-on-check`. It needs the
