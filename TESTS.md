@@ -33,7 +33,7 @@ Contents:
    index, the raster sampler and the sequence extensions; the analyses (PNS and
    the PNS levels, and the gradient limits); the target profile, the results,
    the run function and the check configuration; the Siemens `.asc` profile
-   reader; the version 1 checks (timing, gradient and PNS)
+   reader; the version 1 checks (timing, gradient and PNS); the command
 
 ---
 
@@ -139,6 +139,27 @@ cannot read the file of test IDs.
   after a test changes.
 - A level-4 heading that is not a test name in backticks (for example a
   description of shared test sequences) is not an entry and is ignored.
+
+### Check documents
+
+**Checks:** `docs/checks.md` is the file that `scripts/check_docs.py` writes
+from the specifications of the checks of this package.
+
+**How:** `scripts/check_docs.py --check` loads the check entry points of the
+distribution `pulseq-checks`, makes the text of `docs/checks.md` from their
+`CheckSpec` data, and compares it with the file. It exits 1 and names the
+file when they differ. It also fails when the GitHub anchor of the heading of
+a check (the ID in backticks) is not the anchor that `spec_url` gives for that
+check.
+
+**Assumptions:**
+
+- Only the checks of this package are in the file. A plugin documents its own
+  checks.
+- The anchor rule is GitHub's (lower case, punctuation removed except `-`).
+  The script does not test how another site makes anchors.
+- The check compares text. It does not check that the text of a specification
+  is true.
 
 ---
 
@@ -4134,3 +4155,342 @@ is empty, `cost` is "slow", `url` is None, the other text fields are not empty, 
 **How:** The test reads the fields of `SAFE.spec`.
 
 **Assumptions:** None.
+
+### 2.16 The command (`test_cli.py`)
+
+These tests check `pulseq-check` (`pulseq_checks.cli.main`). They call `main([...])` in the
+test process and read its return value, `capsys` and the files that it writes. Most tests
+replace `registry.check_rules` with small test rules, as `test_run.py` does, so that the
+state of each result is controlled. They write small profile files, config files and a
+synthetic spin-echo `.seq` file (`tests/synthetic.py`) in `tmp_path`. A test rule gives the
+value 1.5 and the limit 2 with the unit mT/m, and, for "not evaluated" and "error", a
+reason. A test rule with an input that the profile does not give ends as "not evaluated"
+before it runs. `run_to_matrix` runs `main` with `--json` and `--quiet`, and reads the
+file back with `ResultMatrix.from_json`, to see which checks ran and which are required.
+
+#### `test_the_exit_status_follows_the_states_of_the_results`
+
+**Checks:** The status is 0 when all results pass, 2 when a result fails, 1 when a result
+is an error, and 1 when a result fails and another is an error (1 wins over 2).
+
+**How:** A parametrized test installs two test rules with the given states, runs `main`
+with `--target` and `--quiet`, and compares the return value.
+
+**Assumptions:** The logic of the status is `ResultMatrix.exit_status` (`test_results.py`).
+This test shows only that the command returns it.
+
+#### `test_a_required_check_that_is_not_evaluated_gives_status_1`
+
+**Checks:** A check that a config names in `required` and that is not evaluated gives
+status 1, and the summary says so.
+
+**How:** A test rule needs `opts.max_grad`, which the profile does not give. The config
+makes it required. The test checks the status and that the summary has "exit status 1".
+
+**Assumptions:** None.
+
+#### `test_a_check_that_is_not_required_and_not_evaluated_gives_status_0`
+
+**Checks:** The same test rule, when it is not required, gives status 0, and the summary
+shows its state "not evaluated".
+
+**How:** The test runs `main` with `--target` only and checks the status and the summary.
+
+**Assumptions:** None.
+
+#### `test_json_to_a_file_reads_back_as_the_matrix`
+
+**Checks:** `--json OUT` writes a file that `ResultMatrix.from_json` reads back as the
+matrix that `run_checks` gives for the same sequence, profile and checks, and the summary
+is still on stdout. The status is that of the matrix (2 here).
+
+**How:** The test runs `main` with one passing and one failing test rule, reads the file,
+and compares it to the result of `run_checks` with `read_profile` of the same file. It
+checks that stdout has the exit status line.
+
+**Assumptions:** The matrix does not contain anything that changes from one run to the
+next (there is no time stamp). This holds for the matrix of version 1.
+
+#### `test_json_to_stdout_is_only_the_json_and_the_summary_goes_to_stderr`
+
+**Checks:** With `--json -`, stdout is the JSON result and nothing else, and the summary
+is on stderr.
+
+**How:** The test reads the whole of stdout with `ResultMatrix.from_json` (an extra line
+would be an error), and checks that stderr has the check IDs and the exit status line.
+
+**Assumptions:** None.
+
+#### `test_json_to_stdout_with_quiet_writes_nothing_to_stderr`
+
+**Checks:** With `--json -` and `--quiet`, stdout is JSON and stderr is empty.
+
+**How:** The test runs `main`, parses stdout as JSON, and compares stderr to the empty
+string.
+
+**Assumptions:** None.
+
+#### `test_json_to_a_path_that_cannot_be_written_gives_status_1`
+
+**Checks:** A `--json` path in a folder that does not exist is an error of the run: status
+1, and a message on stderr that starts with `pulseq-check: error:` and names the path.
+
+**How:** The test gives a path in a folder that it did not make.
+
+**Assumptions:** Other causes of a failed write (a full disk, no permission) go through the
+same `OSError` handling, and the test does not make them.
+
+#### `test_quiet_writes_no_summary_but_keeps_the_status`
+
+**Checks:** `--quiet` writes nothing to stdout and stderr, and the status is still that of
+the results (2 for a failing check).
+
+**How:** The test runs `main` with a failing test rule and `--quiet`.
+
+**Assumptions:** None.
+
+#### `test_quiet_still_prints_an_error_of_the_run`
+
+**Checks:** With `--quiet`, an error of the run (here a profile with no name) still gives
+its message on stderr, starting with `pulseq-check: error:`, and status 1. stdout is empty.
+
+**How:** The test runs `main` with an invalid profile and `--quiet`.
+
+**Assumptions:** None.
+
+#### `test_a_config_gives_the_targets_relative_to_its_file_select_required_and_fast_only`
+
+**Checks:** With `--config`, the command reads the target profiles at the paths relative
+to the config file, not to the working directory, and it uses `select`, `required` and
+`fast_only` of the file.
+
+**How:** The test writes two profiles in a sub-folder of a config folder and a config with
+`select` of three checks, `fast_only = true` and `required` for one check and one target,
+and it changes the working directory to another folder. It reads the `--json` result: the
+targets are both profiles, the slow check is not in it (`fast_only`), the check that is not
+selected is not in it, and only the check of `required` for the target `b` is required. The
+status is 1, because that required check is not evaluated for `b`.
+
+**Assumptions:** None.
+
+#### `test_a_config_without_select_or_fast_only_runs_every_check`
+
+**Checks:** A JSON config with only `format` and `targets` runs all the installed checks,
+and no check is required.
+
+**How:** The test runs `main` with such a file and two test rules (one fast) and reads the
+IDs of the results and the status (0).
+
+**Assumptions:** None.
+
+#### `test_check_selects_the_check_and_makes_it_required`
+
+**Checks:** With `--target`, `--check` runs only the named checks, in the order of the
+check IDs, and makes each one required.
+
+**How:** Three test rules are installed, two are named twice with `--check` in the wrong
+order. The test reads the IDs of the results and that each result is required.
+
+**Assumptions:** None.
+
+#### `test_a_check_that_is_not_evaluated_gives_status_1`
+
+**Checks:** A check that is not evaluated gives status 0 when it is not named, and status
+1 when `--check` names it.
+
+**How:** The same test rule (with an input that the profile does not give) is run twice,
+without and with `--check`, and the two statuses are compared.
+
+**Assumptions:** None.
+
+#### `test_check_is_required_for_each_target`
+
+**Checks:** `--check` makes the check required for each target of the run.
+
+**How:** The test runs with two `--target` profiles and reads which results are required.
+
+**Assumptions:** None.
+
+#### `test_check_with_a_config_is_added_to_select_and_required`
+
+**Checks:** With `--config`, the IDs of `--check` are added to the `select` of the file,
+and are required for all targets on top of the `required` of the file. A check that the
+file requires for one target only is then required for both.
+
+**How:** The config selects two checks and requires one for all targets and one for the
+target `a`. `--check` names one more check and the second one again. The test checks that
+the selected checks (not the fourth) ran, and that the three are required for both targets.
+
+**Assumptions:** None.
+
+#### `test_check_with_a_config_without_select_keeps_every_check_selected`
+
+**Checks:** With `--config` and a file with no `select`, `--check` does not reduce the
+selection to the named checks: all checks run, and only the named one is required.
+
+**How:** The test runs two test rules with `--check` for the second and reads the IDs and
+the `required` flags.
+
+**Assumptions:** None.
+
+#### `test_a_check_that_is_not_installed_gives_status_1`
+
+**Checks:** A `--check` ID that no installed check has is an error of the run: status 1,
+and a message that names the ID.
+
+**How:** The test runs `main` with a check ID that the test rules do not have.
+
+**Assumptions:** The message comes from `run_checks` (`test_run.py`).
+
+#### `test_fast_runs_only_the_fast_checks_and_does_not_make_them_required`
+
+**Checks:** `--fast` removes the checks that are not of the cost class "fast", does not
+make the fast checks required, and does not remove a check that `--check` names.
+
+**How:** One fast and one slow test rule. With `--fast` the result has the fast check, and
+it is not required. With `--fast --check` for the slow check, only the slow check is in the
+result, and it is required (`--check` selects only the named check).
+
+**Assumptions:** None.
+
+#### `test_fast_overrides_fast_only_false_of_a_config`
+
+**Checks:** With a config that has `fast_only = false`, all checks run, and with `--fast`
+only the fast checks run.
+
+**How:** The test runs `main` with the same config without and with `--fast`.
+
+**Assumptions:** The case of a config with `fast_only = true` is in the test of the config.
+
+#### `test_an_invalid_profile_gives_status_1_and_a_message_that_names_the_file`
+
+**Checks:** An invalid profile (an unknown key in `opts`) gives status 1, nothing on
+stdout, and a message on stderr that starts with `pulseq-check: error:` and names the file.
+
+**How:** The test writes the file and runs `main` with `--target`.
+
+**Assumptions:** The content of the message comes from `read_profile` (`test_profile.py`).
+
+#### `test_a_config_that_names_an_invalid_profile_gives_status_1_and_names_the_file`
+
+**Checks:** A config with a target path that does not exist gives status 1 and a message
+that names that path.
+
+**How:** The test writes a config with the path of a file that it did not write.
+
+**Assumptions:** None.
+
+#### `test_an_invalid_config_gives_status_1_and_names_the_file`
+
+**Checks:** An invalid config (no `format`) gives status 1 and a message that names the
+config file.
+
+**How:** The test writes such a file and runs `main` with `--config`.
+
+**Assumptions:** None.
+
+#### `test_a_sequence_file_that_is_missing_gives_status_1_and_names_the_file`
+
+**Checks:** A `.seq` file that does not exist is an error of the run: status 1, nothing on
+stdout, and a message that names the file.
+
+**How:** The test gives the path of a file that does not exist with a valid profile.
+
+**Assumptions:** The other reasons that the read of a `.seq` file can fail give the same
+`RunError` (`test_run.py`).
+
+#### `test_an_error_in_the_arguments_gives_status_1_not_2`
+
+**Checks:** No `--config` and no `--target`, both of them, an unknown option, and an option
+without its value give status 1 (argparse gives 2 by default), no stdout, and a message on
+stderr that has `pulseq-check: error:`.
+
+**How:** A parametrized test runs `main` with each argument list.
+
+**Assumptions:** None.
+
+#### `test_a_missing_sequence_argument_gives_status_1`
+
+**Checks:** A command line with no `SEQ_FILE` gives status 1 and the same message.
+
+**How:** The test runs `main(["--target", path])`.
+
+**Assumptions:** None.
+
+#### `test_help_gives_status_0_and_lists_the_options`
+
+**Checks:** `--help` gives status 0 (it is not an error in the arguments), and the help
+text names each option.
+
+**How:** The test runs `main(["--help"])` and looks for each option name in stdout.
+
+**Assumptions:** The test does not check the wording of the help.
+
+#### `test_the_summary_has_a_line_for_each_check_and_target_and_the_reasons_below_them`
+
+**Checks:** The summary has one line for each check and target, by target in the order of
+the config and then by check ID, with the state, the ID, the target, the value with its
+unit and the limit, the detail of a fail, and `*` on a required result only. The reason of
+a "not evaluated" result is below the table, once for each result, and not in its line.
+The summary ends with the exit status line.
+
+**How:** Two test rules (a failing one that gives the detail "axis y", and one that is not
+evaluated) run for two targets from a config that makes the failing one required for the
+target `b`. The test splits the output at the blank lines and compares the first line of
+each block, the state, the ID and the target of each row, and the required marker. It
+checks the text of the value and of the detail in the row of the fail, and that the reason
+is only in the block of the problems, twice.
+
+**Assumptions:** The test depends on the layout of the summary: blocks that blank lines
+separate, and columns that two spaces separate. It does not check the exact widths.
+
+#### `test_the_summary_lists_the_errors_and_the_unused_sections_of_each_target`
+
+**Checks:** The summary lists each "error" result with its reason, and, for each target
+that has unused profile sections, one line with the target name and the sections. A target
+with none has no line. The last line says that status 1 means an error or a required check
+that was not evaluated.
+
+**How:** A test rule gives an error. The command runs on `tests/profiles/unused.toml` and a
+plain profile. The test checks the first lines of the blocks, the text of the error block,
+and the one line of the unused sections.
+
+**Assumptions:** The unused sections of `unused.toml` include `notes`. The sections of
+`models` that no installed model reads are in the list too, and the test does not check
+them.
+
+#### `test_the_last_line_says_that_a_failure_comes_with_an_error`
+
+**Checks:** With a fail and an error, the last line of the summary is for status 1 and says
+that a check failed too.
+
+**How:** The test installs one failing and one erroring test rule and reads the last line.
+
+**Assumptions:** None.
+
+#### `test_end_to_end_with_the_installed_checks_and_the_prisma_profile`
+
+**Checks:** The command runs the installed checks on a synthetic spin-echo sequence with
+`tests/profiles/prisma.toml`, and writes a summary that has a line for each of three checks
+and ends with the exit status line of the status that it returns.
+
+**How:** The test runs `main` with no test rules and checks that the status is 0 or 2, that
+the IDs `gradient.amplitude.axis`, `pns.safe` and `timing.rasters` are in the output, and
+the last line.
+
+**Assumptions:** The test does not check the numbers or the states of the checks. The
+status can be 0 or 2, because the timing of the synthetic sequence depends on the profile
+that the test uses.
+
+#### `test_the_console_script_is_the_main_function_of_the_cli`
+
+**Checks:** The installed package has the console script `pulseq-check` with the target
+`pulseq_checks.cli:main`, and it loads the `main` function.
+
+**How:** The test reads the `console_scripts` entry points and compares the value and the
+loaded object.
+
+**Assumptions:** The environment has the package installed after the last change to the
+entry points (`uv sync --reinstall-package pulseq-checks`). The test does not run the
+script, and it does not check that the script uses the return value as the exit status: the
+wrapper that the build backend writes does that.

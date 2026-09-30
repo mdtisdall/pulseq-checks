@@ -29,6 +29,10 @@ echo "# TESTS.md"
 uv run python scripts/check_tests_md.py --collected "$collected_tests"
 
 echo
+echo "# docs/checks.md"
+uv run python scripts/check_docs.py --check
+
+echo
 echo "# shellcheck"
 shellcheck --severity=warning scripts/check .claude/hooks/block-main-writes.sh
 echo "ok    shellcheck"
