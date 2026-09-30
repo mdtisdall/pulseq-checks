@@ -3,8 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: proposed (2026-09-30). The user approves the proposed decisions of
-section 2.4 and answers the questions of section 7 before phase 1 starts.
+Status: approved (2026-09-30). The user approved the decisions of section
+2.4, with the version `0.1.0rc1` (decision 11), and answered the questions
+of section 7.
 
 This is the implementation plan for step 2 of `docs/plans/pulseq-checks.md`
 (the design). The design gives the concepts and the decisions. This plan
@@ -28,7 +29,7 @@ make the tag that pulseq-reports pins (design section 9, step 2.5):
    cards (design step 2.4). It is done before pulseq-reports removes those
    checks (decision R7).
 5. The cost classes and the tested time budget of the fast checks.
-6. The tag `v0.1.0`.
+6. The tag `v0.1.0rc1`.
 
 Not in this plan: the work in pulseq-reports (design steps 1 and 3), the
 checks that the design gives as "later" (section 8 of the design), and JUnit
@@ -151,14 +152,33 @@ decisions 3 to 12 and R1 to R7. The ones that this plan uses most:
      for the peak amplitude and the peak slew of each axis, and with
      `check_norms` for the |G| peak against the amplitude limit. It checks
      the whole file and each window.
-9. **No reader knows the GPA limits.** Neither pypulseq nor MATLAB Pulseq
-   reads a gradient amplitude or slew limit from an `.asc` file. The field
-   names are not in any public source that we found (question 1 of section
-   7).
+9. **The GPA limits in a Siemens `.asc` file.** Neither pypulseq nor MATLAB
+   Pulseq reads them. A real file (`MP_GradSys_K2309_2250V_951A_XR_AS82.asc`,
+   in `/Users/dylan/dev/vb_pulseq/data/`, confidential) has them, with a
+   description of each field in its comments. Only the names, the
+   descriptions and the ranges of the values were read; no value is in this
+   plan.
+   - `asGPAParameters[0].flGradMaxAmpl<Mode>`: "maximum of gradient amplitude
+     for the <mode> operation mode".
+   - `asGPAParameters[0].flGradMinRiseTime<Mode>`: "minimum gradient rise
+     time for the <mode> operation mode".
+   - `<Mode>` is `Absolute`, `Nominal`, `Normal`, `Fast`, `UltraFast`,
+     `Whisper` or `Boost` (`Nominal` has only the amplitude). The values
+     give five different pairs, so the mode changes the limits.
+   - Each field has a twin `flDefGrad...`, with the same value in this file.
+     The reader uses `flGrad...`.
+   - `flSysMaxAmplAbsolute[0..2]` (mT/m) is the maximum of the amplifier for
+     each axis. Each value is at or above `flGradMaxAmplAbsolute`. The
+     reader does not use it.
+   - The file gives the units as "n.a.". The user confirmed the Siemens
+     units: the amplitude in mT/m, and the rise time in µs per mT/m. Thus
+     the maximum slew in T/m/s is `1000 / rise time`. The values of the file
+     are in the ranges that these units give (amplitudes 10 to 200 mT/m,
+     slews 30 to 300 T/m/s).
 10. **The `ci` devShell** of this repository has Python 3.12, uv and
     shellcheck (`flake.nix`). That is enough for `uv sync`, ruff and pytest.
 
-### 2.4 Proposed decisions (the user approves them with this plan)
+### 2.4 Decisions of this plan (approved by the user on 2026-09-30)
 
 1. **Package and module names.** The distribution is `pulseq-checks`, the
    import package is `pulseq_checks`, under `src/`. The moved modules keep
@@ -197,11 +217,15 @@ decisions 3 to 12 and R1 to R7. The ones that this plan uses most:
 7. **Entry-point groups.** `pulseq_checks.profile_readers`,
    `pulseq_checks.models` and `pulseq_checks.checks`. The checks of this
    package use the same group, as the cards of pulseq-reports do.
-8. **The time budget.** `scripts/budget.py` measures the fast checks on a
-   sequence of 10⁶ blocks (`build_repeating` of `tests/scale_sequences.py`).
-   The executing agent runs it in phase 8 and before each tag. It is not in
-   `scripts/check`, because a sequence of 10⁶ blocks takes too long to build
-   in CI (question 2 of section 7). The user approves the number in phase 8.
+8. **The time budget.** Two parts (question 2 of section 7):
+   - `scripts/budget.py` measures the fast checks on a sequence of 10⁶
+     blocks (`build_repeating` of `tests/scale_sequences.py`). The executing
+     agent runs it in phase 8 and before each tag. This is the budget of
+     decision 7. The user approves the number in phase 8.
+   - `tests/test_budget.py` runs the fast checks on 10⁵ blocks in
+     `scripts/check`, on each PR, with a large margin (phase 8 sets it from
+     the measurements). It finds a large slowdown. The margin keeps it
+     stable on shared CI machines. It is not the budget of decision 7.
 9. **The JSON result.** One object with `"format": 1`, the version of the
    package, the sequence, the targets (with the source of each value), the
    results, and the unused profile sections.
@@ -209,8 +233,8 @@ decisions 3 to 12 and R1 to R7. The ones that this plan uses most:
     pulseq-reports: one entry for each test, with **Checks**, **How** and
     **Assumptions**, and `scripts/check_tests_md.py` in `scripts/check`. The
     worker agents already ask for it.
-11. **The version.** `0.1.0`, and the tag `v0.1.0`. `CHANGELOG.md` starts
-    with this version.
+11. **The version.** `0.1.0rc1`, and the tag `v0.1.0rc1`. `CHANGELOG.md`
+    starts with this version.
 12. **The PR limit.** At most four PRs of this plan are open at one time.
 
 ### 2.5 Terms
@@ -278,8 +302,7 @@ Wave 6:  Phase 9 (release), after phases 1 to 8
   and the package. Each later phase needs them.
 - Phase 1 copies the modules. Phases 2 to 5 edit or use them.
 - Phases 2, 3 and 4 share no file, except their own `TESTS.md` sections.
-  Phase 4 task 4.2 (the GPA limits) waits for the answer to question 1. The
-  other tasks of phase 4 do not.
+  In phase 4, task 4.2 (the GPA limits) comes after task 4.1.
 - Phase 5 uses the interfaces of phase 3, the PNS hardware of phase 2 and
   the profile reader of phase 4.
 - Phases 6, 7 and 8 share no file. Phase 7 must be merged before
@@ -302,8 +325,8 @@ makes.
 | 5 | `feature/v1-checks` | `checks/__init__.py`, `checks/timing.py`, `checks/gradient.py`, `checks/pns.py` (all new), `pyproject.toml` (the entry points only), `tests/test_check_timing.py`, `tests/test_check_gradient.py`, `tests/test_check_pns.py` (all new), `TESTS.md` sections 2.13 to 2.15 (new) |
 | 6 | `feature/pulseq-check-command` | `cli.py` (new), `pyproject.toml` (`[project.scripts]` only), `scripts/check_docs.py` (new), `docs/checks.md` (new), `docs/usage.md` (new), `README.md`, `scripts/check` (the `docs/checks.md` check), `tests/test_cli.py` (new), `TESTS.md` sections 1 (the docs check) and 2.16 (new) |
 | 7 | `chore/compare-with-cards` | `scripts/compare_with_cards.py` (new), `docs/comparison.md` (new) |
-| 8 | `chore/time-budget` | `scripts/budget.py` (new), `checks/*.py` (the `cost` field only, after phase 5), `docs/checks.md` (made again by `scripts/check_docs.py`) |
-| 9 | `chore/release-0.1.0` | `pyproject.toml` (the version), `CHANGELOG.md` (new), `docs/plans/pulseq-checks-v1.md` (status and results), `docs/plans/pulseq-checks.md` (status) |
+| 8 | `chore/time-budget` | `scripts/budget.py` (new), `tests/test_budget.py` (new), `checks/*.py` (the `cost` field only, after phase 5), `docs/checks.md` (made again by `scripts/check_docs.py`), `TESTS.md` section 2.17 (new) |
+| 9 | `chore/release-0.1.0rc1` | `pyproject.toml` (the version), `CHANGELOG.md` (new), `docs/plans/pulseq-checks-v1.md` (status and results), `docs/plans/pulseq-checks.md` (status) |
 
 Rules:
 
@@ -461,6 +484,7 @@ format = 1
 name = "Prisma AS82"
 vendor = "siemens"
 asc = "MP_GPA_K2309_2250V_951A_AS82.asc"   # optional; relative to the profile
+asc_gradient_mode = "fast"   # optional; the GPA limits of this mode
 
 [opts]              # the keywords of pp.Opts(...)
 max_grad = 80
@@ -500,6 +524,9 @@ Reader rules (`read_profile(path) -> TargetProfile`):
 4. `asc` names an `.asc` file. The `.asc` profile reader (phase 4) gives
    the values of that file. A value that the profile file and the `.asc`
    file both give is an error that names the value and both sources.
+   `asc_gradient_mode` selects the operation mode of the GPA limits (section
+   4.4). Without it, the `.asc` file gives no gradient limits. It is an error
+   without `asc`, or with a mode that the file does not have.
 5. The reader raises `ProfileError` for each error. The run function turns
    it into an error of the run (status 1, R2).
 6. The reader does not supply a default for a value that the file does not
@@ -518,9 +545,18 @@ Reader rules (`read_profile(path) -> TargetProfile`):
   (`aflGCAcousticResonanceFrequency` and
   `asGPAParameters[0].sGCParameters.aflAcousticResonanceFrequency`, with the
   bandwidths).
-- The GPA limits (task 4.2, R5): the maximum amplitude and slew of the
-  gradient system, as `opts.max_grad` and `opts.max_slew` with their unit
-  keywords. The field names come from question 1.
+- The GPA limits (task 4.2, R5), only when the profile gives
+  `asc_gradient_mode` (question 1 of section 7). There is no default mode,
+  because there are no default limits (R2). The mode names in the profile
+  are `absolute`, `normal`, `fast`, `ultrafast`, `whisper` and `boost`
+  (`nominal` has no rise time, so it is not a mode for the limits). For the
+  mode `<Mode>` (section 2.3, fact 9):
+  - `opts.max_grad` = `asGPAParameters[0].flGradMaxAmpl<Mode>`, with
+    `grad_unit = "mT/m"`.
+  - `opts.max_slew` = `1000 / asGPAParameters[0].flGradMinRiseTime<Mode>`,
+    with `slew_unit = "T/m/s"` (the rise time is in µs per mT/m).
+  - The result records the mode in `sources` (for example
+    `"MP_GradSys_...asc (fast)"`).
 - A value that the `.asc` file does not have is not given. It is not an
   error. The profile file can give it.
 
@@ -574,8 +610,8 @@ in seconds, or `None`), `model` and `model_version` (or `None`),
 
 `ResultMatrix`: the results, the targets with their `sources`, the unused
 sections of each profile, `exit_status()` (design section 5.6, R3),
-`to_json()` and `from_json()` (proposed decision 9). `from_json(to_json())`
-gives an equal matrix.
+`to_json()` and `from_json()` (decision 9 of section 2.4).
+`from_json(to_json())` gives an equal matrix.
 
 ### 4.6 The run function and the check configuration (phase 3)
 
@@ -591,7 +627,7 @@ def run_checks(
 ) -> ResultMatrix
 ```
 
-- A path: one read for each target (proposed decision 3). A `Sequence`
+- A path: one read for each target (decision 3 of section 2.4). A `Sequence`
   object: exactly one target, or an error of the run.
 - `limits_from_sequence=True` with a path is an error of the run (decision
   4). With an object, a target with no gradient limits uses
@@ -655,10 +691,10 @@ PR. A task names its tier (section 3.2).
 
 Branch: `chore/python-scaffolding`. Wave 1.
 
-**Task 0.1.** Tier M. Make `pyproject.toml` from section 4.2
-("Configuration") and proposed decisions 1 and 2: the name `pulseq-checks`,
-the version `0.1.0.dev0`, `requires-python = ">=3.12"`, the hatchling
-build of `src/pulseq_checks`, and no entry points yet. Make
+**Task 0.1.** Tier M. Make `pyproject.toml` from section 4.2 ("Configuration")
+and decisions 1 and 2 of section 2.4: the name `pulseq-checks`, the version
+`0.1.0.dev0`, `requires-python = ">=3.12"`, the hatchling build of
+`src/pulseq_checks`, and no entry points yet. Make
 `src/pulseq_checks/__init__.py` with a module docstring only.
 
 **Task 0.2.** Tier M. Copy `tests/conftest.py` and
@@ -677,7 +713,7 @@ pytest with `--collected-tests-file`, `scripts/check_tests_md.py
    the fork at `a74ab06`.
 2. Change the dependency sync line of `CLAUDE.md`: remove "(after
    `pyproject.toml` exists; until then there is nothing to sync)".
-3. Add the fork item to `TODO.md` (proposed decision 2).
+3. Add the fork item to `TODO.md` (decision 2 of section 2.4).
 4. Confirm that CI runs the new `scripts/check` in the `ci` devShell (fact
    10). Change `.github/workflows/check.yml` only if it fails.
 5. Review each diff.
@@ -775,7 +811,7 @@ profiles, and a round trip of each example.
 trip.
 
 **Task 3.3.** Tier H. `rules.py` (`CheckSpec`, `CheckRule`, `RunContext`),
-`registry.py` (the three entry-point groups, proposed decision 7; a
+`registry.py` (the three entry-point groups, decision 7 of section 2.4; a
 duplicate check ID is an error that names both packages), `run.py`
 (`run_checks`, section 4.6) and `config.py` (`read_check_config`).
 `tests/test_run.py` with test check rules defined in the test file: "not
@@ -809,15 +845,15 @@ entry-point group `pulseq_checks.profile_readers` in `pyproject.toml`.
 `tests/test_asc_profile.py` with `write_gradient_asc`: the plain and the
 split layout, the `$INCLUDE` file, and the resonances of both layouts.
 
-**Task 4.2.** Tier H. After question 1 is answered: the GPA limits. Add the
-GPA fields to `write_gradient_asc` (a keyword with the default "no GPA
-fields", so that the tests of phase 1 do not change). Tests: the values and
-their units, and a profile that gives `max_grad` and names an `.asc` with
-the GPA limits is an error (section 4.3, rule 4).
+**Task 4.2.** Tier H. The GPA limits (section 4.4). Add the GPA fields to
+`write_gradient_asc`: a keyword with synthetic amplitudes and rise times for
+each mode, and the default "no GPA fields", so that the tests of phase 1 do
+not change. Do not use a value of a real file. Tests: each mode gives its
+amplitude and `1000 / rise time`; no `asc_gradient_mode` gives no gradient
+limits; an unknown mode, or a mode without `asc`, is an error; a profile
+that gives `max_grad` and selects a mode is an error (section 4.3, rule 4).
 
-**Task 4.3.** Tier X. Review each diff. If question 1 is not answered when
-task 4.1 is ready, merge task 4.1 alone and do task 4.2 in a second PR on
-the branch `feature/asc-gpa-limits`.
+**Task 4.3.** Tier X. Review each diff.
 
 Tasks 4.1 and 4.2 edit the same new file, so they run one after the other.
 
@@ -955,7 +991,14 @@ process, with the synthetic limits and the SAFE example hardware as a
 profile. It prints one line for each check: the time and the peak RSS. It
 stops a run at 5 minutes or at 8 GB of RSS.
 
-**Task 8.2.** Tier X.
+**Task 8.2.** Tier M. `tests/test_budget.py`: build `build_repeating(n)`
+for 10⁵ blocks, write it to `tmp_path`, and time `run_checks` with
+`fast_only=True` and the synthetic profile. It fails when the time is above
+`CI_BUDGET_S`, a constant at the top of the file that task 8.3 sets. Its
+`TESTS.md` entry (section 2.17) says that it finds a large slowdown only and
+is not the budget of decision 7.
+
+**Task 8.3.** Tier X.
 
 1. Run `scripts/budget.py` three times. Record the median of each check.
 2. Propose to the user: the cost class of each check, and the budget of the
@@ -963,32 +1006,36 @@ stops a run at 5 minutes or at 8 GB of RSS.
    them.
 3. Set the `cost` field of each approved fast check. Make `docs/checks.md`
    again.
-4. Write the numbers, the machine and the budget in the PR description and
+4. Run `tests/test_budget.py` three times locally and read the time of
+   the latest CI run of the branch. Set `CI_BUDGET_S` to three times the
+   largest of these times, and tell the user the number.
+5. Write the numbers, the machine and the budget in the PR description and
    in section 8 of this plan (phase 9 copies them).
 
 Checks:
 
 - [ ] The fast checks together are within the approved budget.
+- [ ] `tests/test_budget.py` passes in CI.
 - [ ] `docs/checks.md` is up to date.
 - [ ] `scripts/check` passes.
 
 ---
 
-### Phase 9: release 0.1.0
+### Phase 9: release 0.1.0rc1
 
-Branch: `chore/release-0.1.0`. Wave 6, after phases 1 to 8.
+Branch: `chore/release-0.1.0rc1`. Wave 6, after phases 1 to 8.
 
 **Task 9.1.** Tier X.
 
-1. Set the version `0.1.0` in `pyproject.toml`. Run `uv lock`.
-2. Write `CHANGELOG.md` with the `0.1.0` entry.
+1. Set the version `0.1.0rc1` in `pyproject.toml`. Run `uv lock`.
+2. Write `CHANGELOG.md` with the `0.1.0rc1` entry.
 3. Run `scripts/budget.py` again. The fast checks must be within the budget.
 4. Write the status and section 8 (results) of this plan, and the status
    of the design.
-5. After the merge, and only when the user tells you to: tag `v0.1.0` on the
-   merge commit and push the tag.
+5. After the merge, and only when the user tells you to: tag `v0.1.0rc1` on
+   the merge commit and push the tag.
 6. Tell the user that pulseq-reports can start its step 3 with the tag
-   `v0.1.0`.
+   `v0.1.0rc1`.
 
 Checks:
 
@@ -1001,10 +1048,10 @@ Checks:
 |---|---|---|
 | 1 | 0 | This plan is merged. |
 | 2 | 1 | Phase 0 merged. |
-| 3 | 2, 3, 4 | Phase 1 merged. Task 4.2 also needs the answer to question 1. |
+| 3 | 2, 3, 4 | Phase 1 merged. |
 | 4 | 5 | Phases 2 and 3 merged, and task 4.1 merged. |
 | 5 | 6, 7, 8 | Phase 5 merged. |
-| 6 | 9 | Phases 1 to 8 merged, and task 4.2 merged. |
+| 6 | 9 | Phases 1 to 8 merged. |
 
 Workers inside a phase:
 
@@ -1018,7 +1065,7 @@ Workers inside a phase:
 | 5 | H for task 5.1, H for task 5.2, M for task 5.3, at the same time | Task 5.4 and the review |
 | 6 | H for task 6.1, M for task 6.2, H for task 6.3, at the same time | Task 6.4 and the review |
 | 7 | M for task 7.1 | Tasks 7.2 and 7.3 (the comparison) and the review |
-| 8 | M for task 8.1 | Task 8.2 (the measurements and the user's approval) and the review |
+| 8 | M for task 8.1, M for task 8.2, at the same time | Task 8.3 (the measurements and the user's approval) and the review |
 | 9 | None | All tasks |
 
 The cheaper tier (M) does each copy, the PNS rule, the `.asc` reader for
@@ -1028,14 +1075,14 @@ a rule with its specification, or a long document.
 
 ## 7. Questions still open
 
-1. **The GPA field names (R5).** Which fields of a Siemens `.asc` file give
-   the maximum gradient amplitude and slew of the gradient system, and in
-   which units? The values of a real file are confidential; only the field
-   names and the units are necessary, so that `write_gradient_asc` can write
-   synthetic values. Task 4.2 waits for the answer. Phase 9 waits for task
-   4.2.
-2. **The budget test in CI (proposed decision 8).** A sequence of 10⁶ blocks
-   takes minutes to build. The proposal is a script that the executing
-   agent runs before each tag, not a CI test. Is that acceptable, or must CI
-   run it (for example, in a separate job only on a tag)?
-3. **Approval of the proposed decisions** of section 2.4, items 1 to 12.
+None. The user answered the three questions on 2026-09-30:
+
+1. **The GPA limits (R5).** The fields are in the `.asc` file (section 2.3,
+   fact 9). The user confirmed the units (mT/m, and µs per mT/m for the rise
+   time), and chose that the profile names the operation mode
+   (`asc_gradient_mode`, section 4.4). There is no default mode.
+2. **The time budget.** A test at 10⁵ blocks with a large margin in
+   `scripts/check`, and the budget of 10⁶ blocks before each tag (decision
+   8).
+3. **The decisions of section 2.4.** Approved, with the version `0.1.0rc1`
+   and the tag `v0.1.0rc1` (decision 11).
