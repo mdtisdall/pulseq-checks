@@ -334,6 +334,15 @@ relative 1e-6-of-peak tolerance (section 3.5, item 2, of the plan) covers the wh
 difference, except for a file with a block off the gradient raster, where both
 sample at file times and a relative 1e-9 suffices.
 
+`pns_levels` takes the hardware of the SAFE model from one of three sources: the
+example hardware (`safe_example_hw()`, with no argument), a gradient `.asc` file
+(`gradient_asc`), or a pair `(struct, label)` (`hardware`), where `struct` is a SAFE
+hardware struct in the form of pypulseq's `asc_to_hw`. The last tests of this section
+check the `hardware` keyword against the other two sources, and `SAFE_MODEL` (the
+model `pns.safe` of the target profile, which reads and checks the nine fields of each
+axis) and `hw_from_dict` (the struct of a checked dict). They compare the results
+exactly: the same struct values give the same float operations.
+
 #### `test_summary_matches_calculate_pns_within_the_fork_tolerance`
 
 **Checks:** For a spin echo, a gradient echo, an arbitrary gradient, and a
@@ -499,6 +508,99 @@ technique of `test_extensions.py`'s `_with_rotation_library`), inside
 
 **How:** `isinstance(pns_levels(spin_echo_sequence()), PnsLevels)`. A smoke test of
 the interface; the other tests of this section check individual fields.
+
+**Assumptions:** None.
+
+#### `test_hardware_with_the_example_struct_gives_the_default_levels`
+
+**Checks:** `pns_levels(seq, hardware=(safe_example_hw(), label))` gives the levels of
+`pns_levels(seq)`, except `hardware`, which is the label: `asc_file` is None, and each
+other field is exactly equal.
+
+**How:** For `spin_echo_sequence()` (on the raster) and for a sequence with a block off
+the raster, the test calls both and compares each field of the `PnsLevels` but
+`hardware` (`numpy.array_equal` for the arrays, `==` for the rest).
+
+**Assumptions:** None.
+
+#### `test_hardware_from_an_asc_file_gives_the_levels_of_the_file`
+
+**Checks:** `pns_levels(seq, hardware=(asc_to_hw(read_gradient_asc(path)), label))`
+gives the levels of `pns_levels(seq, gradient_asc=path)`, except `hardware` (the label)
+and `asc_file` (None).
+
+**How:** The local `write_gradient_asc` fixture of this file writes the `.asc` file (the
+plain layout; `test_pns.py` tests the layout of a scanner file). The test compares each
+field but the two with `numpy.array_equal` and `==`.
+
+**Assumptions:** None.
+
+#### `test_pns_levels_refuses_both_gradient_asc_and_hardware`
+
+**Checks:** `pns_levels` with `gradient_asc` and `hardware` together raises
+`ValueError`.
+
+**How:** `pns_levels(spin_echo_sequence(), gradient_asc=path, hardware=(safe_example_hw(),
+"LABEL"))` inside `pytest.raises(ValueError, match="not both")`.
+
+**Assumptions:** None.
+
+#### `test_safe_model_reads_a_valid_dict`
+
+**Checks:** `SAFE_MODEL` has the name `pns.safe` and the version 1. `SAFE_MODEL.read` of
+a valid dict gives a new dict, with equal values, and each value is a float, also for an
+int in the input. The `name` is optional.
+
+**How:** The test builds the dict from `safe_example_hw()` (`name`, and for `x`, `y` and
+`z` the nine fields) and compares `read(params)` with it (`==`, `is not` for the dict and
+for one axis, `type(v) is float`). It then reads a dict without `name` (no `name` in the
+result) and a dict with an int `stim_limit` (the float of it).
+
+**Assumptions:** None.
+
+#### `test_safe_model_refuses_an_unknown_key`
+
+**Checks:** `SAFE_MODEL.read` raises `ValueError` for a key that is not `name`, `x`, `y`
+or `z`, and for a field that is not one of the nine, and the message names the key with
+its axis (`extra`, `z.tau4`).
+
+**How:** Parametrized: a valid dict with the key `extra`, and a valid dict with the field
+`tau4` in `z`. The test checks the message for `unknown key` and for the key.
+
+**Assumptions:** None.
+
+#### `test_safe_model_refuses_a_missing_field_or_axis`
+
+**Checks:** `SAFE_MODEL.read` raises `ValueError` for a dict without one field of an
+axis, or without an axis. The message names the key (`y.a2`, `z`).
+
+**How:** The test deletes `a2` from `y` of a valid dict, then `z` from another, and
+matches the message with `missing key`.
+
+**Assumptions:** None.
+
+#### `test_safe_model_refuses_a_value_that_is_not_a_real_number`
+
+**Checks:** `SAFE_MODEL.read` raises `ValueError` that names the key (`x.tau2`) for a
+field whose value is a bool (`True`, `False`), a str, `None`, a list, NaN or an infinity,
+and for a `name` that is not a str.
+
+**How:** Parametrized on the eight values, set as `x.tau2` in a valid dict. A second dict
+has `name = 1`.
+
+**Assumptions:** A bool is an int in Python. The model refuses it, so a TOML `true` is
+not a number.
+
+#### `test_hw_from_dict_gives_the_example_hardware`
+
+**Checks:** `hw_from_dict(SAFE_MODEL.read(params))` for the example parameters has the
+name and the 27 values of `safe_example_hw()`, its name is "unknown" when `params` has
+no `name`, and, used as `hardware`, it gives exactly the levels of the example hardware,
+except `hardware` (the label).
+
+**How:** The test compares the name and each field of each axis with `==`, then compares
+the levels of `spin_echo_sequence()` with `hardware=(hw, label)` with those of
+`pns_levels(seq)`, as the first test of this list does.
 
 **Assumptions:** None.
 
@@ -1468,14 +1570,17 @@ compares `whole_rms_mt_per_m` against a fresh whole-file oracle call.
 gradient_asc=...)` — the SAFE model itself (`pns_levels.pns_levels`, the pinned
 pypulseq fork's chunked SAFE recursion) has moved there. `pns_levels_for`
 keeps one `PnsLevels` for each (sequence object, hardware), the hardware
-being the example hardware or the resolved path of the gradient `.asc`
-file, and the rule of `seq_index.sequence_index` for staleness (all are
+being the example hardware, the resolved path of the gradient `.asc`
+file, or a `hardware` pair `(struct, label)` (its key is the label and the 27
+values of the struct, so two pairs with the same label and values are one
+hardware), and the rule of `seq_index.sequence_index` for staleness (all are
 rebuilt when the number of blocks or the last block id changes), so that a page with both the PNS summary card and the
 diagram's PNS lane for one sequence runs the SAFE model once.
 `peak_tr_window` is the start and end of the TR that holds the
 prediction's peak, counted from the sequence start in steps of the TR
 definition. Without a gradient `.asc` file, the prediction uses pypulseq's
-example hardware, which is not a real scanner.
+example hardware, which is not a real scanner. The tests of `hardware` are the last
+ones of this section.
 
 The real `.asc` files are confidential, so the tests write a test `.asc` file
 with the PNS parameters of pypulseq's example hardware, with the
@@ -1769,5 +1874,62 @@ times, not four: the cache keeps one result for each hardware.
 **How:** The test patches `pns.pns_levels` as above, and calls
 `pns.pns_levels_for(seq, gradient_asc=...)` with the keys `None` (the example hardware),
 a `.asc` file, `None`, the same file. It checks there were 2 calls.
+
+**Assumptions:** None.
+
+#### `test_pns_levels_for_hardware_from_an_asc_file_gives_the_levels_of_the_file`
+
+**Checks:** `pns_levels_for(seq, hardware=(asc_to_hw(read_gradient_asc(path)), label))`
+gives the levels of `pns_levels_for(seq, gradient_asc=path)`, except `hardware` (the
+label) and `asc_file` (None), for the plain layout and for the layout of a scanner file.
+
+**How:** Parametrized on `split`. The `write_gradient_asc` fixture of `tests/conftest.py`
+writes the file. The test compares each field but the two (`numpy.array_equal` for the
+arrays, `==` for the rest).
+
+**Assumptions:** None.
+
+#### `test_pns_levels_for_refuses_both_gradient_asc_and_hardware`
+
+**Checks:** `pns_levels_for` with `gradient_asc` and `hardware` together raises
+`ValueError`, and does not run the SAFE model.
+
+**How:** The test patches `pns.pns_levels` as in the tests below, calls
+`pns_levels_for` with both inside `pytest.raises(ValueError, match="not both")`, and
+checks that the patch recorded no call.
+
+**Assumptions:** None.
+
+#### `test_pns_levels_for_keeps_one_result_for_equal_hardware_pairs`
+
+**Checks:** Two `hardware` pairs with the same label and the same field values, with two
+different struct objects, are one hardware: the second call runs no model and gives the
+kept result.
+
+**How:** The test patches `pns.pns_levels` as above and calls `pns_levels_for(seq,
+hardware=(safe_example_hw(), "LABEL"))` two times, each with a new struct. It checks
+that there was 1 call and that the second result `is` the first.
+
+**Assumptions:** None.
+
+#### `test_pns_levels_for_computes_again_for_another_label_or_value`
+
+**Checks:** A `hardware` pair with another label, or with one other field value, runs
+the model; going back to an earlier pair does not run it again.
+
+**How:** The test patches `pns.pns_levels` as above and calls with the pairs a, a, b (the
+label "B"), c (`z.stim_thresh` plus 1), a, c, each with a new struct where the values are
+the same. It checks the call count after each change: 1, 1, 2, 3, 3.
+
+**Assumptions:** None.
+
+#### `test_pns_levels_for_hardware_pair_is_not_the_example_hardware_or_a_file`
+
+**Checks:** A `hardware` pair has its own key: the example hardware (no argument), a
+`.asc` file, and a pair with the values and the label of the example hardware are three
+hardwares of one sequence. Each runs the model one time.
+
+**How:** The test patches `pns.pns_levels` as above, and calls the three two times in
+the same order. It checks that there were 3 calls.
 
 **Assumptions:** None.

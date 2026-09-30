@@ -1,13 +1,17 @@
+import dataclasses
+
 import numpy as np
 import pypulseq as pp
 import pytest
+from pypulseq.utils.safe_pns_prediction import safe_example_hw
+from pypulseq.utils.siemens.asc_to_hw import asc_to_hw
 from synthetic import SYSTEM, block_pulse, empty_sequence, spin_echo_sequence
 
 from pulseq_checks import pns
 from pulseq_checks import pns_levels as pns_levels_module
 from pulseq_checks.asc import EXAMPLE_HARDWARE, hardware_name, read_gradient_asc
 from pulseq_checks.pns import pns_levels_for
-from pulseq_checks.pns_levels import NO_GRADIENTS
+from pulseq_checks.pns_levels import NO_GRADIENTS, PnsLevels
 
 
 @pytest.fixture(scope="module")
@@ -252,3 +256,97 @@ def test_pns_levels_for_alternating_two_hardwares_runs_the_model_two_times(
     for gradient_asc in (None, path, None, path):
         pns_levels_for(seq, gradient_asc=gradient_asc)
     assert len(calls) == 2
+
+
+def _assert_levels_equal(a: PnsLevels, b: PnsLevels, *, ignore: tuple[str, ...]) -> None:
+    """Every field of `a` and `b` is exactly equal, except the fields named in `ignore`
+    (`numpy.array_equal` for the arrays, `==` for the rest)."""
+    for field in dataclasses.fields(PnsLevels):
+        if field.name in ignore:
+            continue
+        x, y = getattr(a, field.name), getattr(b, field.name)
+        if isinstance(x, np.ndarray):
+            assert np.array_equal(x, y), field.name
+        else:
+            assert x == y, field.name
+
+
+@pytest.mark.parametrize("split", [False, True], ids=["plain", "split"])
+def test_pns_levels_for_hardware_from_an_asc_file_gives_the_levels_of_the_file(
+    write_gradient_asc, split
+):
+    """`pns_levels_for` with `hardware=(asc_to_hw(read_gradient_asc(path)), label)` gives the
+    levels of `gradient_asc=path`, except the hardware name (the label) and `asc_file`
+    (None), for the plain layout and for the layout of a scanner file."""
+    seq = spin_echo_sequence()
+    path = write_gradient_asc(split=split)
+    from_file = pns_levels_for(seq, gradient_asc=path)
+    levels = pns_levels_for(seq, hardware=(asc_to_hw(read_gradient_asc(path)), "LABEL"))
+    assert from_file.asc_file == path.name
+    assert levels.hardware == "LABEL"
+    assert levels.asc_file is None
+    _assert_levels_equal(levels, from_file, ignore=("hardware", "asc_file"))
+
+
+def test_pns_levels_for_refuses_both_gradient_asc_and_hardware(monkeypatch, write_gradient_asc):
+    """`pns_levels_for` with `gradient_asc` and `hardware` together raises `ValueError`,
+    and does not run the SAFE model."""
+    calls = _count_pns_levels_calls(monkeypatch)
+    with pytest.raises(ValueError, match="not both"):
+        pns_levels_for(
+            spin_echo_sequence(),
+            gradient_asc=write_gradient_asc(),
+            hardware=(safe_example_hw(), "LABEL"),
+        )
+    assert calls == []
+
+
+def test_pns_levels_for_keeps_one_result_for_equal_hardware_pairs(monkeypatch):
+    """Two `hardware` pairs with the same label and the same field values, with two
+    different struct objects, are one hardware: the second call runs no model and gives
+    the kept result."""
+    calls = _count_pns_levels_calls(monkeypatch)
+    seq = spin_echo_sequence()
+
+    first = pns_levels_for(seq, hardware=(safe_example_hw(), "LABEL"))
+    second = pns_levels_for(seq, hardware=(safe_example_hw(), "LABEL"))
+    assert len(calls) == 1
+    assert second is first
+
+
+def test_pns_levels_for_computes_again_for_another_label_or_value(monkeypatch):
+    """A `hardware` pair with another label, or with one other field value, is another
+    hardware and runs the model; going back to an earlier pair does not run it again (the
+    calls for pairs a, a, b (label), c (value), a, c give 3)."""
+    calls = _count_pns_levels_calls(monkeypatch)
+    seq = spin_echo_sequence()
+    other_value = safe_example_hw()
+    other_value.z.stim_thresh += 1.0
+
+    pns_levels_for(seq, hardware=(safe_example_hw(), "A"))
+    pns_levels_for(seq, hardware=(safe_example_hw(), "A"))
+    assert len(calls) == 1
+    pns_levels_for(seq, hardware=(safe_example_hw(), "B"))
+    assert len(calls) == 2
+    pns_levels_for(seq, hardware=(other_value, "A"))
+    assert len(calls) == 3
+    pns_levels_for(seq, hardware=(safe_example_hw(), "A"))
+    pns_levels_for(seq, hardware=(other_value, "A"))
+    assert len(calls) == 3
+
+
+def test_pns_levels_for_hardware_pair_is_not_the_example_hardware_or_a_file(
+    monkeypatch, write_gradient_asc
+):
+    """A `hardware` pair is its own key: the example hardware (`None`), a `.asc` file and
+    a pair with the values of the example hardware are three hardwares of one sequence,
+    and each runs the model one time."""
+    calls = _count_pns_levels_calls(monkeypatch)
+    seq = spin_echo_sequence()
+    path = write_gradient_asc()
+
+    for _ in range(2):
+        pns_levels_for(seq)
+        pns_levels_for(seq, gradient_asc=path)
+        pns_levels_for(seq, hardware=(safe_example_hw(), EXAMPLE_HARDWARE))
+    assert len(calls) == 3

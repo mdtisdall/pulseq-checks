@@ -18,11 +18,12 @@ import math
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pypulseq as pp
 
-from .pns_levels import PnsLevels, pns_levels
+from .pns_levels import SAFE_FIELDS, PnsLevels, pns_levels
 from .seq_index import sequence_index
 
 
@@ -43,27 +44,54 @@ class PnsPrediction:
 
 # For each sequence object: the number of blocks, the last block id (the rule of
 # `seq_index.sequence_index`) and one `PnsLevels` for each hardware, keyed by `None` (the
-# example hardware) or the resolved path of the gradient .asc file.
-_Kept = tuple[int, int, dict[str | None, PnsLevels]]
+# example hardware), the resolved path of the gradient .asc file, or the tuple of
+# `_hardware_key` (a tuple is never equal to a path or to `None`).
+_Hardware = tuple[SimpleNamespace, str]
+_HardwareKey = str | None | tuple
+_Kept = tuple[int, int, dict[_HardwareKey, PnsLevels]]
 _LEVELS_CACHE: "weakref.WeakKeyDictionary[pp.Sequence, _Kept]" = weakref.WeakKeyDictionary()
 
 
-def pns_levels_for(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> PnsLevels:
-    """The `PnsLevels` of `seq` with the hardware of the gradient .asc file `gradient_asc`
-    (`pns_levels.pns_levels`), or pypulseq's example hardware when it is None.
+def _hardware_key(hardware: _Hardware) -> tuple:
+    """The key of a `hardware` pair: its label and the 27 values of its struct as floats
+    (`SAFE_FIELDS` of `x`, `y` and `z`, in this order). Two pairs with the same label and
+    the same values have one key, whatever their structs are."""
+    struct, label = hardware
+    values = tuple(
+        float(getattr(getattr(struct, axis), field)) for axis in "xyz" for field in SAFE_FIELDS
+    )
+    return ("hardware", label, values)
 
-    The result is kept for the sequence object and the hardware, so that the PNS summary
-    card (`cards.pns.pns_card`) and the diagram's PNS lane (`cards.diagram.diagram_card`)
-    compute it one time for each hardware of one sequence
-    (`docs/plans/diagram-lanes.md`, section 4.6). A relative and an absolute spelling of
-    one file are one hardware. The kept results are built again when the number of blocks
-    or the last block id changed, for example after `add_block` (the rule of
-    `seq_index.sequence_index`).
+
+def pns_levels_for(
+    seq: pp.Sequence,
+    *,
+    gradient_asc: str | Path | None = None,
+    hardware: _Hardware | None = None,
+) -> PnsLevels:
+    """The `PnsLevels` of `seq` with the hardware of the gradient .asc file `gradient_asc`,
+    with `hardware` (a pair of a SAFE hardware struct and its label), or with pypulseq's
+    example hardware when both are None (`pns_levels.pns_levels`, which has the rules of
+    the arguments: both together raise ValueError).
+
+    The result is kept for the sequence object and the hardware, so that a caller that
+    needs the levels of one sequence for one hardware more than once (`pns_prediction`,
+    for example) runs the SAFE model one time for each hardware. A relative and an
+    absolute spelling of one file are one hardware, and two `hardware` pairs with the same
+    label and the same field values are one hardware (`_hardware_key`). The kept results
+    are built again when the number of blocks or the last block id changed, for example
+    after `add_block` (the rule of `seq_index.sequence_index`).
     """
+    if gradient_asc is not None and hardware is not None:
+        raise ValueError("give gradient_asc or hardware, not both")
     block_events = seq.block_events
     num_blocks = len(block_events)
     last_id = int(next(reversed(block_events))) if num_blocks else 0
-    key = None if gradient_asc is None else str(Path(gradient_asc).resolve())
+    key: _HardwareKey
+    if hardware is not None:
+        key = _hardware_key(hardware)
+    else:
+        key = None if gradient_asc is None else str(Path(gradient_asc).resolve())
 
     kept = _LEVELS_CACHE.get(seq)
     if kept is None or kept[0] != num_blocks or kept[1] != last_id:
@@ -71,7 +99,7 @@ def pns_levels_for(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) 
         _LEVELS_CACHE[seq] = kept
     by_hardware = kept[2]
     if key not in by_hardware:
-        by_hardware[key] = pns_levels(seq, gradient_asc=gradient_asc)
+        by_hardware[key] = pns_levels(seq, gradient_asc=gradient_asc, hardware=hardware)
     return by_hardware[key]
 
 

@@ -13,8 +13,10 @@ views, so the stored level and the exact views agree to float rounding.
 """
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pypulseq as pp
@@ -53,8 +55,10 @@ PEAK_TOLERANCE = 1e-6
 @dataclass(frozen=True)
 class PnsLevels:
     reason: str | None  # why there is no prediction (NO_GRADIENTS), or None
-    hardware: str  # the hardware name in the .asc file, or asc.EXAMPLE_HARDWARE
-    asc_file: str | None  # the .asc file name, or None for the example hardware
+    hardware: str  # the hardware name in the .asc file, asc.EXAMPLE_HARDWARE, or the label
+    # of the `hardware` argument of `pns_levels`
+    asc_file: str | None  # the .asc file name, or None without one (example hardware or
+    # `hardware` argument)
     hw: dict[str, dict[str, float]]  # "x", "y", "z": tau1, tau2, tau3, a1, a2, a3,
     # stim_limit, g_scale, as pypulseq's hardware namespace has them
     dt_s: float  # the gradient raster
@@ -77,11 +81,22 @@ def bin_samples_for(num_samples: int, dt: float) -> int:
     return max(finest, coarsest_for_size, 1)
 
 
-def pns_levels(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> PnsLevels:
+def pns_levels(
+    seq: pp.Sequence,
+    *,
+    gradient_asc: str | Path | None = None,
+    hardware: tuple[SimpleNamespace, str] | None = None,
+) -> PnsLevels:
     """The stored level and the summary of the SAFE PNS total of `seq`, with the hardware
-    of the gradient .asc file `gradient_asc`, or pypulseq's example hardware when it is None
-    (as `pns.pns_prediction` chooses them, with `asc.read_gradient_asc`,
-    `asc.hardware_name` and `asc.EXAMPLE_HARDWARE`).
+    of the gradient .asc file `gradient_asc`, with `hardware`, or with pypulseq's example
+    hardware when both are None (`asc.read_gradient_asc`, `asc.hardware_name` and
+    `asc.EXAMPLE_HARDWARE` choose the name and the file of the first and the last).
+
+    `hardware` is a pair `(struct, label)`: `struct` is a SAFE hardware struct in the form
+    of pypulseq's `asc_to_hw` (a `SimpleNamespace` with `.x`, `.y` and `.z`, each with
+    `tau1` to `tau3`, `a1` to `a3`, `stim_limit`, `stim_thresh` and `g_scale`), and `label`
+    is the string that `PnsLevels.hardware` gives. `PnsLevels.asc_file` is then None.
+    `gradient_asc` and `hardware` together raise ValueError.
 
     The model is `calc_pns` of the pinned fork, on other samples:
 
@@ -116,19 +131,24 @@ def pns_levels(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> P
     `peak_time_s` None. Memory: the chunk, the longest block, the stored level and a
     few numbers for each chunk.
 
-    Raises NotImplementedError for a sequence with the rotation extension
-    (`extensions.refuse_rotations`), as the gradient cards and the functions of
-    `rf_profiles.py` do.
+    Raises ValueError when both `gradient_asc` and `hardware` are given, and
+    NotImplementedError for a sequence with the rotation extension
+    (`extensions.refuse_rotations`).
     """
+    if gradient_asc is not None and hardware is not None:
+        raise ValueError("give gradient_asc or hardware, not both")
     refuse_rotations(seq)
     dt = seq.grad_raster_time
 
-    if gradient_asc is None:
-        hw_ns, hardware, asc_file = safe_example_hw(), EXAMPLE_HARDWARE, None
+    if hardware is not None:
+        hw_ns, hardware_label = hardware
+        asc_file = None
+    elif gradient_asc is None:
+        hw_ns, hardware_label, asc_file = safe_example_hw(), EXAMPLE_HARDWARE, None
     else:
         asc = read_gradient_asc(gradient_asc)
         hw_ns = asc_to_hw(asc)
-        hardware, asc_file = hardware_name(asc), Path(gradient_asc).name
+        hardware_label, asc_file = hardware_name(asc), Path(gradient_asc).name
     hw = _hw_to_dict(hw_ns)
 
     index = sequence_index(seq)
@@ -138,7 +158,7 @@ def pns_levels(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> P
         empty = np.zeros(0, dtype=np.float32)
         return PnsLevels(
             reason=NO_GRADIENTS,
-            hardware=hardware,
+            hardware=hardware_label,
             asc_file=asc_file,
             hw=hw,
             dt_s=dt,
@@ -214,7 +234,7 @@ def pns_levels(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> P
 
     return PnsLevels(
         reason=None,
-        hardware=hardware,
+        hardware=hardware_label,
         asc_file=asc_file,
         hw=hw,
         dt_s=dt,
@@ -332,3 +352,75 @@ def _cast_outward(values: np.ndarray, *, down: bool) -> np.ndarray:
         cast = cast.copy()
         cast[wrong_side] = np.nextafter(cast[wrong_side], direction)
     return cast
+
+
+# ---- The SAFE model of the profile (section 4.9) ----
+
+# The nine fields of each axis of a SAFE hardware struct, in the order of
+# `safe_example_hw` and `asc_to_hw`. `pns.pns_levels_for` keys its results on them too.
+SAFE_FIELDS = ("tau1", "tau2", "tau3", "a1", "a2", "a3", "stim_limit", "stim_thresh", "g_scale")
+
+
+def _real(value: object, key: str) -> float:
+    """`value` as a float, when it is a finite int or float and not a bool; ValueError that
+    names `key` otherwise."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{key}: must be a real number, not {type(value).__name__}")  # noqa: TRY004
+    if not math.isfinite(value):
+        raise ValueError(f"{key}: must be a finite number, not {value!r}")
+    return float(value)
+
+
+class _SafeModel:
+    """The model `pns.safe` of the target profile (`[models.pns.safe]`): the hardware
+    parameters of the SAFE PNS model."""
+
+    name = "pns.safe"
+    version = 1
+
+    def read(self, params: Mapping) -> dict:
+        """The checked parameters of `params` as a new plain dict with float values: an
+        optional `name` (str) and the axes `x`, `y` and `z`, each a mapping with exactly the
+        nine fields of `SAFE_FIELDS`. Raises ValueError, with a message that names the key
+        (with its axis), for an unknown key, a missing key, a value of the wrong type or a
+        value that is not finite."""
+        if not isinstance(params, Mapping):
+            raise ValueError("pns.safe: the parameters must be a mapping")  # noqa: TRY004
+        for key in params:
+            if key not in ("name", *_AXES3):
+                raise ValueError(f"unknown key {key!r}")
+        result: dict = {}
+        if "name" in params:
+            if not isinstance(params["name"], str):
+                raise ValueError(f"name: must be a string, not {type(params['name']).__name__}")
+            result["name"] = params["name"]
+        for axis in _AXES3:
+            if axis not in params:
+                raise ValueError(f"missing key {axis!r}")
+            fields = params[axis]
+            if not isinstance(fields, Mapping):
+                raise ValueError(f"{axis}: must be a mapping of the SAFE fields")  # noqa: TRY004
+            for key in fields:
+                if key not in SAFE_FIELDS:
+                    raise ValueError(f"unknown key '{axis}.{key}'")
+            for field in SAFE_FIELDS:
+                if field not in fields:
+                    raise ValueError(f"missing key '{axis}.{field}'")
+            result[axis] = {field: _real(fields[field], f"{axis}.{field}") for field in SAFE_FIELDS}
+        return result
+
+
+SAFE_MODEL = _SafeModel()
+
+
+def hw_from_dict(params: Mapping) -> SimpleNamespace:
+    """The SAFE hardware struct in the form of pypulseq's `asc_to_hw` (for the `hardware`
+    argument of `pns_levels`) from the parameters of `SAFE_MODEL.read`. It checks `params`
+    with `SAFE_MODEL.read`, so it raises the same ValueError. `name` is the name in
+    `params`, or "unknown" without one. `_safe_gwf_to_pns_chunk` does not use the `checksum`
+    and `dependency` of `safe_example_hw`, so the struct does not have them."""
+    checked = SAFE_MODEL.read(params)
+    hw = SimpleNamespace(name=checked.get("name", "unknown"))
+    for axis in _AXES3:
+        setattr(hw, axis, SimpleNamespace(**checked[axis]))
+    return hw
