@@ -161,8 +161,9 @@ Each result has:
 check gets it when the target profile does not have a necessary field, or
 when a necessary model is not available. Examples:
 
-- PNS with no `.asc` file: not evaluated. The pypulseq example hardware is
-  not a real scanner, so it does not give a pass.
+- PNS with no real SAFE parameters (no `.asc` file, and no SAFE parameters
+  in the profile file): not evaluated. The pypulseq example hardware is not a
+  real scanner, so it does not give a pass.
 - Handedness with no declared convention: not evaluated (section 6.2).
 
 A check run takes one sequence and a list of targets. The result is a matrix
@@ -359,7 +360,8 @@ Version 1 of this package is small:
 - the gradient amplitude check and the gradient slew check of each axis, for
   a finished file. The \|G\| amplitude check is optional (it replaces
   `check_norms` of pulseq-reports).
-- the PNS check with the SAFE model of pypulseq, only with a real `.asc` file,
+- the PNS check with the SAFE model of pypulseq, only with real SAFE
+  parameters: from a Siemens `.asc` file, or in the profile file (decision 6),
 - the result matrix, the JSON output and the `pulseq-check` command.
 
 The check summary card is in pulseq-reports, not in this package. It uses the
@@ -422,6 +424,90 @@ decisions for pulseq-reports. They are not in this document.
    from the Siemens `.asc` file (the GPA limits, the SAFE parameters, the
    acoustic resonances), and how much from the profile file? Is a site
    profile a file in the repository of the sequence?
+
+   Existing formats. We do not want a new format if an existing format can
+   do the work. Facts from MATLAB Pulseq (commit `c746912`, the commit that
+   pulseq-reports pins), pypulseq `1.5.0.post1` and the Pulseq file
+   specification (`doc/specification.tex`):
+
+   - **No file format for the system parameters.** MATLAB `mr.opts` gives a
+     struct. pypulseq `Opts` is a class. Neither library writes or reads
+     them as a file. The two objects also have different fields: MATLAB has
+     `maxB1`, `maxFreqOffset`, `rfSamplesLimit` and `flag_trid`, and pypulseq
+     does not. The names are different (`maxGrad` and `max_grad`).
+   - **The `.seq` file has only the rasters.** The specification reserves
+     four necessary `[DEFINITIONS]` keys: `GradientRasterTime`,
+     `RadiofrequencyRasterTime`, `AdcRasterTime` and `BlockDurationRaster`.
+     It also reserves `Name`, `FOV` and `TotalDuration`. Both libraries write
+     the rasters and read them again. They do not write the gradient limits,
+     the dead times, the ringdown or B0. The specification permits
+     "hardware-dependent parameters" in `[DEFINITIONS]`, but it gives no
+     keys for them.
+   - **The Siemens `.asc` file is the only file that both libraries read.**
+     MATLAB `mr.Siemens.readasc` and pypulseq `readasc` and `asc_to_hw` read
+     the same vendor file. It gives the SAFE PNS parameters, the cardiac
+     model, the acoustic resonances, the gradient scale factors and the name
+     of the gradient system. pypulseq `asc_to_hw` does not give the values of
+     `Opts` (the gradient limits, the rasters, the dead times and B0). The
+     file is for Siemens only.
+
+   - **The values already have a shared form in memory.** MATLAB
+     `calcPNS(hardware)` and pypulseq `calc_pns(hardware)` accept an `.asc`
+     path or a hardware struct. The struct is the output of `asc_to_hw`
+     (MATLAB refers to `safe_example_hw()` for it): `name`, and for each axis
+     `x`, `y` and `z` the fields `tau1` to `tau3`, `a1` to `a3`,
+     `stim_limit`, `stim_thresh` and `g_scale`. pypulseq reads the acoustic
+     resonances from the `.asc` file into a list of frequency and bandwidth
+     pairs, and `calc_grad_spectrum` accepts this list.
+   - **The PNS parameters are the parameters of one model.** The fields of
+     the hardware struct are the parameters of the SAFE model, the model of
+     Siemens. GE and Philips use different PNS models, with different
+     parameters. The acoustic resonances, the gradient limits, the rasters,
+     the dead times and B0 do not depend on a model.
+
+   Recommendation:
+
+   - **The profile file can give each value directly, for each vendor.** An
+     `.asc` file is not necessary. No format exists, so a small profile file
+     is necessary. It uses the existing forms:
+     - the values of `Opts` use the keyword names and the units of pypulseq
+       `Opts`, because this package uses pypulseq. Then each entry goes
+       directly to a keyword of `pp.Opts(...)`. The documentation of the
+       format gives the `mr.opts` name of each entry. For the rasters, use
+       the reserved `[DEFINITIONS]` names.
+     - the PNS parameters use the fields of the SAFE hardware struct, with
+       the name of their model.
+     - the acoustic resonances are a list of frequency and bandwidth pairs.
+   - **A Siemens `.asc` file is an optional source.** It can give the SAFE
+     parameters and the acoustic resonances. It is a profile reader (section
+     5.2), not a necessary input.
+   - **Other vendors.** For a scanner that does not use the SAFE model, the
+     PNS check is "not evaluated" until a model plugin for its PNS model
+     exists. Then the profile gives the parameters of that model. The other
+     values of the profile file are the same for each vendor.
+   - **The source of each value.** Each result records the source of each
+     value that it uses: the profile file or the `.asc` file.
+   - **A value from two sources is an error.** If the profile file gives a
+     value, and it also names an `.asc` file that gives the same value, the
+     profile is not valid. A rule that selects one source is not visible to
+     the reader of a result.
+   - **Extension without a new version.** A new vendor or model adds its
+     parameters to the profile, and an older version of this package can
+     still read the profile. The file has a section for each model, with the
+     name of the model (for example the SAFE parameters in a section `safe`
+     under PNS). Each model plugin reads only its section. The rules for
+     names that the reader does not know:
+     - a section that the reader does not know (for example a model that is
+       not installed, or data for a different tool) is accepted, and the
+       reader ignores it. The result lists the sections that were not used.
+     - a key that the reader does not know, inside a section that the reader
+       knows (for example `max_slwe` in the `Opts` values), is an error. A
+       necessary value that is misspelled gives "not evaluated". But an
+       optional limit that is misspelled and ignored can change a fail into
+       a pass.
+     - the profile file declares the version of its format.
+   - Later, propose `[DEFINITIONS]` keys for the system limits to the Pulseq
+     community, together with the convention declaration of decision 10.
 7. **The speed budget.** For example: "the version 1 checks of a file with
    10⁶ blocks take less than N seconds". PNS can be slow for a large file.
    Does each check have a cost class, and can the caller select checks?
