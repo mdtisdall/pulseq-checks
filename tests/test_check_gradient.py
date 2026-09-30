@@ -462,7 +462,7 @@ def test_the_spec_sets_each_field(check):
         }[check]
     )
     assert spec.version == 1
-    assert spec.cost == "slow"
+    assert spec.cost == "fast"  # task 8.3 of the plan, from scripts/budget.py
     assert spec.url is None
     assert spec.models == ()
     assert spec.inputs == (("opts.max_slew",) if check is SLEW_AXIS else ("opts.max_grad",))
