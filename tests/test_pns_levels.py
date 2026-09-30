@@ -1,8 +1,12 @@
+import dataclasses
+import math
+
 import numpy as np
 import pypulseq as pp
 import pytest
 from pypulseq.event_lib import EventLibrary
 from pypulseq.utils.safe_pns_prediction import safe_example_hw
+from pypulseq.utils.siemens.asc_to_hw import asc_to_hw
 from synthetic import (
     SYSTEM,
     arbitrary_gradient_sequence,
@@ -12,13 +16,16 @@ from synthetic import (
     spin_echo_sequence,
 )
 
-from pulseq_checks.asc import EXAMPLE_HARDWARE
+from pulseq_checks.asc import EXAMPLE_HARDWARE, read_gradient_asc
 from pulseq_checks.pns_levels import (
     NO_GRADIENTS,
     PEAK_TOLERANCE,
+    SAFE_FIELDS,
+    SAFE_MODEL,
     PnsLevels,
     _cast_outward,
     bin_samples_for,
+    hw_from_dict,
     pns_levels,
 )
 
@@ -289,3 +296,146 @@ def test_pns_levels_is_a_frozen_dataclass():
     """`pns_levels` returns a `PnsLevels` instance (a smoke test of the interface, not
     of a specific field: the other tests of this module check the fields)."""
     assert isinstance(pns_levels(spin_echo_sequence()), PnsLevels)
+
+
+def _assert_levels_equal(a: PnsLevels, b: PnsLevels, *, ignore: tuple[str, ...]) -> None:
+    """Every field of `a` and `b` is exactly equal, except the fields named in `ignore`
+    (`numpy.array_equal` for the arrays, `==` for the rest)."""
+    for field in dataclasses.fields(PnsLevels):
+        if field.name in ignore:
+            continue
+        x, y = getattr(a, field.name), getattr(b, field.name)
+        if isinstance(x, np.ndarray):
+            assert np.array_equal(x, y), field.name
+        else:
+            assert x == y, field.name
+
+
+def test_hardware_with_the_example_struct_gives_the_default_levels():
+    """`hardware=(safe_example_hw(), label)` gives the levels of the default call, except
+    the hardware name, which is the label, exactly, for a sequence on the raster and for
+    one off it."""
+    for seq in (spin_echo_sequence(), _off_raster_sequence()):
+        default = pns_levels(seq)
+        levels = pns_levels(seq, hardware=(safe_example_hw(), "LABEL"))
+        assert levels.hardware == "LABEL"
+        assert levels.asc_file is None
+        _assert_levels_equal(levels, default, ignore=("hardware",))
+
+
+def test_hardware_from_an_asc_file_gives_the_levels_of_the_file(write_gradient_asc):
+    """`hardware=(asc_to_hw(read_gradient_asc(path)), label)` gives the levels of
+    `gradient_asc=path`, except the hardware name (the label) and `asc_file` (None)."""
+    seq = spin_echo_sequence()
+    path = write_gradient_asc()
+    from_file = pns_levels(seq, gradient_asc=path)
+    levels = pns_levels(seq, hardware=(asc_to_hw(read_gradient_asc(path)), "LABEL"))
+    assert from_file.asc_file == path.name
+    assert levels.hardware == "LABEL"
+    assert levels.asc_file is None
+    _assert_levels_equal(levels, from_file, ignore=("hardware", "asc_file"))
+
+
+def test_pns_levels_refuses_both_gradient_asc_and_hardware(write_gradient_asc):
+    """`pns_levels` with `gradient_asc` and `hardware` together raises `ValueError`."""
+    with pytest.raises(ValueError, match="not both"):
+        pns_levels(
+            spin_echo_sequence(),
+            gradient_asc=write_gradient_asc(),
+            hardware=(safe_example_hw(), "LABEL"),
+        )
+
+
+def _safe_dict(name: str | None = "MP_GPA_EXAMPLE") -> dict:
+    """The parameters of `safe_example_hw()` as the dict of `SAFE_MODEL.read`, with the
+    `name` when it is not None."""
+    hw = safe_example_hw()
+    params = {"name": name} if name is not None else {}
+    for axis in "xyz":
+        params[axis] = {field: getattr(getattr(hw, axis), field) for field in SAFE_FIELDS}
+    return params
+
+
+def test_safe_model_reads_a_valid_dict():
+    """`SAFE_MODEL.read` of the example parameters gives an equal new dict of floats, and
+    the model has the name `pns.safe` and the version 1. An int is read as a float, and
+    `name` is optional."""
+    assert SAFE_MODEL.name == "pns.safe"
+    assert SAFE_MODEL.version == 1
+    params = _safe_dict()
+    result = SAFE_MODEL.read(params)
+    assert result == params
+    assert result is not params
+    assert result["x"] is not params["x"]
+    assert all(type(v) is float for axis in "xyz" for v in result[axis].values())
+
+    assert "name" not in SAFE_MODEL.read(_safe_dict(name=None))
+    params["y"]["stim_limit"] = 15  # an int
+    read = SAFE_MODEL.read(params)["y"]["stim_limit"]
+    assert read == 15.0
+    assert type(read) is float
+
+
+@pytest.mark.parametrize(
+    ("edit", "key"),
+    [
+        (lambda p: p.update(extra=1.0), "extra"),
+        (lambda p: p["z"].update(tau4=1.0), "z.tau4"),
+    ],
+    ids=["axis level", "field level"],
+)
+def test_safe_model_refuses_an_unknown_key(edit, key):
+    """`SAFE_MODEL.read` raises `ValueError` that names an unknown key (with its axis for
+    a field)."""
+    params = _safe_dict()
+    edit(params)
+    with pytest.raises(ValueError, match="unknown key") as info:
+        SAFE_MODEL.read(params)
+    assert key in str(info.value)
+
+
+def test_safe_model_refuses_a_missing_field_or_axis():
+    """`SAFE_MODEL.read` raises `ValueError` that names a missing field (with its axis)
+    or a missing axis."""
+    params = _safe_dict()
+    del params["y"]["a2"]
+    with pytest.raises(ValueError, match="missing key 'y.a2'"):
+        SAFE_MODEL.read(params)
+
+    params = _safe_dict()
+    del params["z"]
+    with pytest.raises(ValueError, match="missing key 'z'"):
+        SAFE_MODEL.read(params)
+
+
+@pytest.mark.parametrize("value", [True, False, "1.0", None, [1.0], math.nan, math.inf, -math.inf])
+def test_safe_model_refuses_a_value_that_is_not_a_real_number(value):
+    """`SAFE_MODEL.read` raises `ValueError` that names the key of a field whose value is a
+    bool, another type that is not an int or a float, or a float that is not finite; a
+    `name` that is not a str raises too."""
+    params = _safe_dict()
+    params["x"]["tau2"] = value
+    with pytest.raises(ValueError, match=r"x\.tau2"):
+        SAFE_MODEL.read(params)
+
+    params = _safe_dict(name=None)
+    params["name"] = 1
+    with pytest.raises(ValueError, match="name"):
+        SAFE_MODEL.read(params)
+
+
+def test_hw_from_dict_gives_the_example_hardware():
+    """`hw_from_dict(SAFE_MODEL.read(params))` has the name and the 27 values of
+    `safe_example_hw()`, "unknown" without a name, and used as `hardware` it gives the
+    levels of the example hardware exactly (except the label)."""
+    hw = hw_from_dict(SAFE_MODEL.read(_safe_dict()))
+    example = safe_example_hw()
+    assert hw.name == example.name
+    for axis in "xyz":
+        for field in SAFE_FIELDS:
+            assert getattr(getattr(hw, axis), field) == getattr(getattr(example, axis), field)
+    assert hw_from_dict(SAFE_MODEL.read(_safe_dict(name=None))).name == "unknown"
+
+    seq = spin_echo_sequence()
+    levels = pns_levels(seq, hardware=(hw, "LABEL"))
+    _assert_levels_equal(levels, pns_levels(seq), ignore=("hardware",))
