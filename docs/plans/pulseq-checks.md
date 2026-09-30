@@ -3,17 +3,21 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: design. This is not an implementation plan. It gives the concepts, the
-structure and the decisions that are still open (section 11). An
-implementation plan follows after the user answers the open decisions.
+Status: design. The user answered the open decisions on 2026-09-30 (section
+11). This is not an implementation plan. It gives the concepts, the structure
+and the decisions. An implementation plan comes next.
 
 Source: this document is the part of the pulseq-reports design
-[`docs/plans/pulseq-checks.md`](https://github.com/mdtisdall/pulseq-reports/blob/51d95900637c0e5e74c7335f57db6659135dc4f4/docs/plans/pulseq-checks.md)
-(pulseq-reports #102, commit `51d9590`, written on 2026-09-30) that applies to
-this repository. The work in pulseq-reports is not in this document: the
-removal of `Card.checks`, `check_norms` and the exit status 2 before `0.2.0`
-final, the check summary card, the exit status of `pulseq-report`, and the
-removal of the moved modules from pulseq-reports. The section numbers are the
+[`docs/plans/pulseq-checks.md`](https://github.com/mdtisdall/pulseq-reports/blob/8e66ea54eed9887ccc46662405e19a427c2b0d95/docs/plans/pulseq-checks.md)
+that applies to this repository. The design was written in pulseq-reports #102
+(commit `51d9590`), and its decisions were recorded in pulseq-reports #103
+(commit `8e66ea5`), both on 2026-09-30. Decisions 4 and 6 in this document go
+further than the source (section 11).
+
+The work in pulseq-reports is not in this document: the removal of
+`Card.checks`, `check_norms` and the exit status 2 before `0.2.0` final, the
+check summary card, the exit status of `pulseq-report`, and the removal of
+the moved modules from pulseq-reports. The section numbers are the
 same as in the source, so that the two documents can refer to each other.
 In this document, "pulseq-reports" means that repository, and a path such as
 `src/pulseq_reports/...` is a path in it.
@@ -142,9 +146,22 @@ The target profile tells which model applies to that scanner.
 
 Each check rule declares the profile fields and the models that it needs.
 
-The target profile replaces `HardwareLimits` of pulseq-reports (decision 8).
-A report can use a target profile as context, for example to show a limit as
-a line on a chart. Thus the target profile is a public type of this package.
+A target profile is a TOML or JSON file. It gives the vendor, the rasters,
+the dead times, B0 and the gradient limits. It can also give the parameters
+of a model, for example the SAFE parameters, and the acoustic resonances. It
+can name a Siemens `.asc` file, which gives the SAFE parameters and the
+acoustic resonances. When the profile file and the `.asc` file both give one
+value, the result is an error, not a silent override. A site keeps its
+profiles where it wants, for example next to its sequences. Section 5.11
+gives the format (decision 6).
+
+`HardwareLimits` moves to `pulseq-checks` with `grad_limits` (section 7.2),
+and a target profile contains it. `pulseq-reports` exports it again, so its
+callers do not break. Its gradient limits card uses it to show the percent of
+each limit, with no verdict (decision 8). The target profile replaces the
+card options `limits`, `gradient_asc` and `check_norms` of pulseq-reports. A
+report can use a target profile as context, for example to show a limit as a
+line on a chart. Thus the target profile is a public type of this package.
 
 ### 5.3 Results
 
@@ -179,7 +196,7 @@ this repository gives one entry for each ID:
 - the inputs from the target profile,
 - the limit and the tolerance,
 - the pass condition,
-- the cost (fast, or slow for a large file),
+- the cost class, `fast` or `slow` (section 5.9),
 - the pypulseq function that the check uses, if any.
 
 The message of a result gives the ID, so that a reader can find the
@@ -214,16 +231,28 @@ summary card is work in pulseq-reports. This package must supply:
 
 | Status | Meaning |
 |---|---|
-| 0 | Each check passed. |
+| 0 | Each check passed. Each required check was evaluated. |
 | 2 | At least one check failed. |
-| 1 | An error in the arguments or the profiles, or a check that was not evaluated. |
+| 1 | An error in the arguments or the profiles, or a required check that was not evaluated. |
 
-Decision 3 in section 11 asks if "not evaluated" gives 1, or a status of its
-own. The command writes a result that a machine can read (JSON, and maybe
-JUnit XML for CI dashboards) and a short summary for a person.
+A check is required when the caller names it, in the configuration file or
+with a flag. A check that runs by default and does not have its inputs gives
+"not evaluated" in the output, and the status does not change (decision 3).
 
-To stop CI on a failed check is the work of `pulseq-check`, not of
-`pulseq-report`.
+A check uses the limits of the sequence (`seq.system`) only when the caller
+permits it explicitly, with a flag or an entry in the profile. The result
+records that the limits came from the sequence. This permission is only for
+a `Sequence` object that the caller gives through the Python API. For a
+sequence that `seq.read` reads from a `.seq` file, the permission is an
+error: the file does not contain the limits of its author, so `seq.system`
+has only the default values of pypulseq (decision 4).
+
+The command writes a result that a machine can read (JSON, and maybe JUnit
+XML for CI dashboards) and a short summary for a person.
+
+To stop CI on a failed check is the work of `pulseq-check`. In
+pulseq-reports, an opt-in flag, for example `--fail-on-check`, makes
+`pulseq-report` give a non-zero status when a check in its summary fails.
 
 ### 5.7 Plugins
 
@@ -231,9 +260,11 @@ To stop CI on a failed check is the work of `pulseq-check`, not of
 check rules. A project can add a check for its site without a card.
 (`pulseq-reports` keeps its entry-point group for cards.)
 
-The configuration file and option code of the command line of pulseq-reports
-(`options.py`, and the configuration reader in `cli.py`) is written for cards
-now. Decision 9 asks if the shared part comes to this package.
+Each package has its own command line (decision 9). `pulseq-checks` has a
+public function that reads a check configuration: the targets and the
+selected checks. `pulseq-reports` keeps its card options (`options.py`,
+`cli.py`) and calls that function. Thus the two commands read the same check
+configuration file.
 
 ### 5.8 Rely on pypulseq
 
@@ -242,6 +273,121 @@ A check uses the pypulseq rule when pypulseq has one. The timing check calls
 limits check uses the slew definition of pypulseq (pulseq-reports
 [`docs/notes/slew-definitions.md`](https://github.com/mdtisdall/pulseq-reports/blob/51d95900637c0e5e74c7335f57db6659135dc4f4/docs/notes/slew-definitions.md)).
 `pulseq-checks` does not copy a rule that pypulseq has.
+
+### 5.9 Cost classes
+
+Each check declares a cost class, `fast` or `slow` (decision 7). The cost
+class is one field of the specification of the check, and its default is
+`slow`. Thus a plugin check that nobody measured does not make the fast set
+slow. A plugin author changes one field to put a check in the fast set.
+
+The caller can select checks, or run only the fast checks. The fast checks of
+`pulseq-checks` have a tested time budget on a file with 10⁶ blocks. The
+implementation plan sets the number after a measurement. The budget test does
+not include plugin checks. A plugin author can use the same timing helper to
+measure a plugin check.
+
+The user's condition for this decision: other developers must be able to add
+their own checks easily. If a part of this design makes that difficult, open
+the decision again.
+
+### 5.10 Rasters
+
+`seq.read` keeps the raster times of the file. `check_timing` uses the
+rasters of `seq.system`, which come from the target. A separate check, the
+raster check, compares the rasters that the file declares with the rasters of
+the target. The target profile gives the rule: equal, or an integer multiple.
+The timing check then runs with the rasters of the target (decision 5).
+
+### 5.11 The target profile format
+
+This section gives the facts and the rules for the format of section 5.2
+(decision 6). We do not want a new format if an existing format can do the
+work.
+
+Facts from MATLAB Pulseq (commit `c746912`, the commit that pulseq-reports
+pins), pypulseq `1.5.0.post1` and the Pulseq file specification
+(`doc/specification.tex`):
+
+- **No file format for the system parameters.** MATLAB `mr.opts` gives a
+  struct. pypulseq `Opts` is a class. Neither library writes or reads them as
+  a file. The two objects also have different fields: MATLAB has `maxB1`,
+  `maxFreqOffset`, `rfSamplesLimit` and `flag_trid`, and pypulseq does not.
+  The names are different (`maxGrad` and `max_grad`).
+- **The `.seq` file has only the rasters.** The specification reserves four
+  necessary `[DEFINITIONS]` keys: `GradientRasterTime`,
+  `RadiofrequencyRasterTime`, `AdcRasterTime` and `BlockDurationRaster`. It
+  also reserves `Name`, `FOV` and `TotalDuration`. Both libraries write the
+  rasters and read them again. They do not write the gradient limits, the
+  dead times, the ringdown or B0. The specification permits
+  "hardware-dependent parameters" in `[DEFINITIONS]`, but it gives no keys
+  for them.
+- **The Siemens `.asc` file is the only file that both libraries read.**
+  MATLAB `mr.Siemens.readasc` and pypulseq `readasc` and `asc_to_hw` read the
+  same vendor file. It gives the SAFE PNS parameters, the cardiac model, the
+  acoustic resonances, the gradient scale factors and the name of the
+  gradient system. pypulseq `asc_to_hw` does not give the values of `Opts`
+  (the gradient limits, the rasters, the dead times and B0). Thus, if the
+  `.asc` file must give the GPA limits, the profile reader of this package
+  must read them itself. The file is for Siemens only.
+- **The values already have a shared form in memory.** MATLAB
+  `calcPNS(hardware)` and pypulseq `calc_pns(hardware)` accept an `.asc` path
+  or a hardware struct. The struct is the output of `asc_to_hw` (MATLAB
+  refers to `safe_example_hw()` for it): `name`, and for each axis `x`, `y`
+  and `z` the fields `tau1` to `tau3`, `a1` to `a3`, `stim_limit`,
+  `stim_thresh` and `g_scale`. pypulseq reads the acoustic resonances from
+  the `.asc` file into a list of frequency and bandwidth pairs, and
+  `calc_grad_spectrum` accepts this list.
+- **The PNS parameters are the parameters of one model.** The fields of the
+  hardware struct are the parameters of the SAFE model, the model of
+  Siemens. GE and Philips use different PNS models, with different
+  parameters. The acoustic resonances, the gradient limits, the rasters, the
+  dead times and B0 do not depend on a model.
+
+Rules:
+
+- **The file is TOML or JSON.** Python reads both with no new dependency
+  (`tomllib`, `json`).
+- **The profile file can give each value directly, for each vendor.** An
+  `.asc` file is not necessary. The profile file uses the existing forms:
+  - the values of `Opts` use the keyword names and the units of pypulseq
+    `Opts`, because this package uses pypulseq. Then each entry goes
+    directly to a keyword of `pp.Opts(...)`. The documentation of the format
+    gives the `mr.opts` name of each entry. For the rasters, use the
+    reserved `[DEFINITIONS]` names.
+  - the PNS parameters use the fields of the SAFE hardware struct, with the
+    name of their model.
+  - the acoustic resonances are a list of frequency and bandwidth pairs.
+- **A Siemens `.asc` file is an optional source.** It can give the SAFE
+  parameters and the acoustic resonances. It is a profile reader (section
+  5.2), not a necessary input.
+- **Other vendors.** For a scanner that does not use the SAFE model, the PNS
+  check is "not evaluated" until a model plugin for its PNS model exists.
+  Then the profile gives the parameters of that model. The other values of
+  the profile file are the same for each vendor.
+- **The source of each value.** Each result records the source of each value
+  that it uses: the profile file or the `.asc` file.
+- **A value from two sources is an error.** If the profile file gives a
+  value, and it also names an `.asc` file that gives the same value, the
+  profile is not valid. A rule that selects one source is not visible to the
+  reader of a result.
+- **Extension without a new version.** A new vendor or model adds its
+  parameters to the profile, and an older version of this package can still
+  read the profile. The file has a section for each model, with the name of
+  the model (for example the SAFE parameters in a section `safe` under PNS).
+  Each model plugin reads only its section. The rules for names that the
+  reader does not know:
+  - a section that the reader does not know (for example a model that is not
+    installed, or data for a different tool) is accepted, and the reader
+    ignores it. The result lists the sections that were not used.
+  - a key that the reader does not know, inside a section that the reader
+    knows (for example `max_slwe` in the `Opts` values), is an error. A
+    necessary value that is misspelled gives "not evaluated". But an
+    optional limit that is misspelled and ignored can change a fail into a
+    pass.
+  - the profile file declares the version of its format.
+- **Later.** Propose `[DEFINITIONS]` keys for the system limits to the Pulseq
+  community, together with the convention declaration of decision 10.
 
 ## 6. Kinds of checks that we can see now
 
@@ -284,8 +430,10 @@ Two checks are possible:
 
 The correct location for the declaration is the `[DEFINITIONS]` section of
 the `.seq` file. That is a convention for the Pulseq community. This library
-must not invent it alone. Until a convention exists, the declaration can be in
-the check configuration file, next to the targets (decision 10).
+must not invent it alone.
+
+The location of the declaration is deferred (decision 10). Version 1 has no
+convention checks. The item is in `TODO.md`.
 
 ## 7. A separate package
 
@@ -348,27 +496,34 @@ repository makes tagged releases.
   First `pulseq-checks` makes a tag, then `pulseq-reports` changes its pin.
   There will be more of these changes at the start, while the measurement
   code changes for the checks.
-- The option and configuration code of the command line (section 5.7).
+- Each package has its own command line. Both read the same check
+  configuration file through one function of this package (section 5.7).
 
 ## 8. Version 1
 
 Version 1 of this package is small:
 
-- one target profile format, and a Siemens `.asc` profile reader,
+- one target profile format (TOML or JSON, section 5.11), and a Siemens
+  `.asc` profile reader,
 - a list of targets for each check run,
+- the cost classes and the time budget of the fast checks (section 5.9),
+- the raster check (section 5.10),
 - the timing check (a wrapper of `check_timing`),
 - the gradient amplitude check and the gradient slew check of each axis, for
-  a finished file. The \|G\| amplitude check is optional (it replaces
-  `check_norms` of pulseq-reports).
+  a finished file,
+- the worst-case amplitude under rotation: the peak of \|G\| against the
+  amplitude limit. It replaces `check_norms` of pulseq-reports (decision 11).
 - the PNS check with the SAFE model of pypulseq, only with real SAFE
   parameters: from a Siemens `.asc` file, or in the profile file (decision 6),
 - the result matrix, the JSON output and the `pulseq-check` command.
 
-The check summary card is in pulseq-reports, not in this package. It uses the
-interface of section 5.5.
+The check summary card and its `--fail-on-check` flag are in pulseq-reports,
+not in this package. The card uses the interface of section 5.5.
 
-The other kinds of section 6 come later. The structure of section 5 accepts
-them without a new design.
+The worst-case slew under rotation needs a vector slew measurement. The
+library does not have one yet, so that check comes later. The convention
+checks come later (decision 10). The other kinds of section 6 come later.
+The structure of section 5 accepts them without a new design.
 
 ## 9. Order of work
 
@@ -377,7 +532,8 @@ repository has step 2 and a part of step 4.
 
 1. **Step 1 of the source (in pulseq-reports).** pulseq-reports removes
    `Card.checks`, the `check_norms` option and the exit status 2 before
-   `0.2.0` final. This repository does not wait for it.
+   `0.2.0` final (decision 1). `HardwareLimits` stays in pulseq-reports until
+   step 3. This repository does not wait for step 1.
 2. **Make `pulseq-checks`.**
    1. The dev-workflow setup. Done (#1).
    2. Move the measurement modules of section 7.2 with their tests, from
@@ -388,8 +544,9 @@ repository has step 2 and a part of step 4.
       current checks of the cards of pulseq-reports.
    5. Make a tag that pulseq-reports can pin.
 3. **Step 3 of the source (in pulseq-reports).** pulseq-reports uses this
-   package, removes its copies of the moved modules and adds the check summary
-   card. It needs the tag of step 2.5.
+   package, removes its copies of the moved modules, exports `HardwareLimits`
+   again, and adds the check summary card and `--fail-on-check`. It needs the
+   tag of step 2.5.
 4. **Later.** More kinds of checks (section 6), more profile readers, JUnit
    output, and proposals to pypulseq.
 
@@ -406,123 +563,36 @@ is not built two times.
 - A proposal to pypulseq or to MATLAB Pulseq stands alone. It does not name
   `pulseq-reports` or `pulseq-checks`.
 
-## 11. Decisions still open
+## 11. Decisions
 
-The numbers are the same as in the source. Decisions 1 and 2 (the timing of
-the removal before `0.2.0`, and the exit status of `pulseq-report`) are
-decisions for pulseq-reports. They are not in this document.
+The user made these decisions on 2026-09-30. Do not open them again. The
+numbers are the same as in the source. Decisions 1 and 2 are decisions for
+pulseq-reports: remove `Card.checks` and the exit status 2 before `0.2.0`
+final, and give `pulseq-report` an opt-in `--fail-on-check` flag.
 
-3. **The exit status of "not evaluated".** Is it 1, like an error, or a
-   status of its own? Can a caller mark a check as "may be not evaluated"?
-4. **Limits from the sequence.** Can a check use the `seq.system` limits of
-   the file? Recommended: only with an explicit opt-in, and the result records
-   the source of the limits.
-5. **Rasters.** `seq.read` keeps the raster times of the file.
-   `check_timing` uses the rasters of `seq.system`. Must a separate check
-   compare the rasters of the file with the rasters of the target?
-6. **The target profile format.** TOML, or another format? How much comes
-   from the Siemens `.asc` file (the GPA limits, the SAFE parameters, the
-   acoustic resonances), and how much from the profile file? Is a site
-   profile a file in the repository of the sequence?
+| # | Decision | Answer | Where |
+|---|---|---|---|
+| 3 | The exit status of "not evaluated" | Status 1 only for a required check (a check that the caller names). A default check that is not evaluated does not change the status. | 5.6 |
+| 4 | The limits of the sequence (`seq.system`) | Only with an explicit opt-in, and only for a `Sequence` object from the Python API. For a `.seq` file, the opt-in is an error. The result records the source of the limits. | 5.6 |
+| 5 | The rasters of the file and of the target | A separate raster check. The target profile gives the rule (equal, or an integer multiple). The timing check uses the rasters of the target. | 5.10 |
+| 6 | The target profile format | A TOML or JSON file that can name a Siemens `.asc` file. A value in both files is an error. The profile file can also give the model parameters (for example SAFE) and the acoustic resonances directly, in a section for each model. An unknown section is ignored and listed. An unknown key in a known section is an error. | 5.2, 5.11 |
+| 7 | The speed budget | Cost classes (`fast`, `slow`) and a tested budget for the fast checks of the library. The user's condition: other developers must be able to add their own checks easily. The cost class is one field, with the default `slow`. | 5.9 |
+| 8 | `HardwareLimits` | It moves to `pulseq-checks`, and a target profile contains it. `pulseq-reports` exports it again. | 5.2, 9 |
+| 9 | The command-line code | Each package has its own. `pulseq-checks` has a public function that reads a check configuration, and `pulseq-reports` uses it. | 5.7 |
+| 10 | The location of the convention declaration | Deferred. It is in `TODO.md`. Version 1 has no convention checks. | 6.2 |
+| 11 | The worst case under rotation | Worst-case amplitude (the peak of \|G\|) in version 1. Worst-case slew later, after a vector slew measurement. | 8 |
+| 12 | The name and the repository | `mdtisdall/pulseq-checks`: public, MIT, with the same dev-workflow as `pulseq-reports` (#1, #2). | 9 |
 
-   Existing formats. We do not want a new format if an existing format can
-   do the work. Facts from MATLAB Pulseq (commit `c746912`, the commit that
-   pulseq-reports pins), pypulseq `1.5.0.post1` and the Pulseq file
-   specification (`doc/specification.tex`):
+Two answers in this document go further than the source:
 
-   - **No file format for the system parameters.** MATLAB `mr.opts` gives a
-     struct. pypulseq `Opts` is a class. Neither library writes or reads
-     them as a file. The two objects also have different fields: MATLAB has
-     `maxB1`, `maxFreqOffset`, `rfSamplesLimit` and `flag_trid`, and pypulseq
-     does not. The names are different (`maxGrad` and `max_grad`).
-   - **The `.seq` file has only the rasters.** The specification reserves
-     four necessary `[DEFINITIONS]` keys: `GradientRasterTime`,
-     `RadiofrequencyRasterTime`, `AdcRasterTime` and `BlockDurationRaster`.
-     It also reserves `Name`, `FOV` and `TotalDuration`. Both libraries write
-     the rasters and read them again. They do not write the gradient limits,
-     the dead times, the ringdown or B0. The specification permits
-     "hardware-dependent parameters" in `[DEFINITIONS]`, but it gives no
-     keys for them.
-   - **The Siemens `.asc` file is the only file that both libraries read.**
-     MATLAB `mr.Siemens.readasc` and pypulseq `readasc` and `asc_to_hw` read
-     the same vendor file. It gives the SAFE PNS parameters, the cardiac
-     model, the acoustic resonances, the gradient scale factors and the name
-     of the gradient system. pypulseq `asc_to_hw` does not give the values of
-     `Opts` (the gradient limits, the rasters, the dead times and B0). The
-     file is for Siemens only.
-
-   - **The values already have a shared form in memory.** MATLAB
-     `calcPNS(hardware)` and pypulseq `calc_pns(hardware)` accept an `.asc`
-     path or a hardware struct. The struct is the output of `asc_to_hw`
-     (MATLAB refers to `safe_example_hw()` for it): `name`, and for each axis
-     `x`, `y` and `z` the fields `tau1` to `tau3`, `a1` to `a3`,
-     `stim_limit`, `stim_thresh` and `g_scale`. pypulseq reads the acoustic
-     resonances from the `.asc` file into a list of frequency and bandwidth
-     pairs, and `calc_grad_spectrum` accepts this list.
-   - **The PNS parameters are the parameters of one model.** The fields of
-     the hardware struct are the parameters of the SAFE model, the model of
-     Siemens. GE and Philips use different PNS models, with different
-     parameters. The acoustic resonances, the gradient limits, the rasters,
-     the dead times and B0 do not depend on a model.
-
-   Recommendation:
-
-   - **The profile file can give each value directly, for each vendor.** An
-     `.asc` file is not necessary. No format exists, so a small profile file
-     is necessary. It uses the existing forms:
-     - the values of `Opts` use the keyword names and the units of pypulseq
-       `Opts`, because this package uses pypulseq. Then each entry goes
-       directly to a keyword of `pp.Opts(...)`. The documentation of the
-       format gives the `mr.opts` name of each entry. For the rasters, use
-       the reserved `[DEFINITIONS]` names.
-     - the PNS parameters use the fields of the SAFE hardware struct, with
-       the name of their model.
-     - the acoustic resonances are a list of frequency and bandwidth pairs.
-   - **A Siemens `.asc` file is an optional source.** It can give the SAFE
-     parameters and the acoustic resonances. It is a profile reader (section
-     5.2), not a necessary input.
-   - **Other vendors.** For a scanner that does not use the SAFE model, the
-     PNS check is "not evaluated" until a model plugin for its PNS model
-     exists. Then the profile gives the parameters of that model. The other
-     values of the profile file are the same for each vendor.
-   - **The source of each value.** Each result records the source of each
-     value that it uses: the profile file or the `.asc` file.
-   - **A value from two sources is an error.** If the profile file gives a
-     value, and it also names an `.asc` file that gives the same value, the
-     profile is not valid. A rule that selects one source is not visible to
-     the reader of a result.
-   - **Extension without a new version.** A new vendor or model adds its
-     parameters to the profile, and an older version of this package can
-     still read the profile. The file has a section for each model, with the
-     name of the model (for example the SAFE parameters in a section `safe`
-     under PNS). Each model plugin reads only its section. The rules for
-     names that the reader does not know:
-     - a section that the reader does not know (for example a model that is
-       not installed, or data for a different tool) is accepted, and the
-       reader ignores it. The result lists the sections that were not used.
-     - a key that the reader does not know, inside a section that the reader
-       knows (for example `max_slwe` in the `Opts` values), is an error. A
-       necessary value that is misspelled gives "not evaluated". But an
-       optional limit that is misspelled and ignored can change a fail into
-       a pass.
-     - the profile file declares the version of its format.
-   - Later, propose `[DEFINITIONS]` keys for the system limits to the Pulseq
-     community, together with the convention declaration of decision 10.
-7. **The speed budget.** For example: "the version 1 checks of a file with
-   10⁶ blocks take less than N seconds". PNS can be slow for a large file.
-   Does each check have a cost class, and can the caller select checks?
-8. **`HardwareLimits`.** It is public in pulseq-reports `0.2.0`. Does it move
-   to `pulseq-checks` and `pulseq-reports` export it again? Or does the target
-   profile replace it?
-9. **The shared command-line code.** Does the option and configuration code
-   move to `pulseq-checks`, or does each package have its own?
-10. **The convention declaration.** Where does it go until the Pulseq
-    community has a convention? Do we propose a `[DEFINITIONS]` key to
-    pypulseq and MATLAB Pulseq?
-11. **The worst case under rotation.** Version 1 or later?
-12. **The name and the repository.** Answered: `mdtisdall/pulseq-checks`,
-    public, with the same dev-workflow as `pulseq-reports` (#1). The MIT
-    license is in #2.
+- **Decision 4.** The source permits the opt-in for each sequence. Here, the
+  opt-in is an error for a `.seq` file, because the file does not contain the
+  limits of its author (section 5.11).
+- **Decision 6.** The source takes the SAFE parameters and the acoustic
+  resonances only from an `.asc` file, and runs the PNS check only with a
+  real `.asc` file. Here, the profile file can also give them, so that a site
+  with no `.asc` file and other vendors can use the same format (section
+  5.11).
 
 ## 12. Terms
 
