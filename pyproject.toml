@@ -12,6 +12,9 @@ dependencies = [
     "scipy",
 ]
 
+[project.scripts]
+pulseq-check = "pulseq_checks.cli:main"
+
 [project.entry-points."pulseq_checks.profile_readers"]
 siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
 
