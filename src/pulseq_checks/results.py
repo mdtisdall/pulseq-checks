@@ -45,8 +45,10 @@ class Location:
 class Result:
     """The result of one check for one target (design section 5.3, plan section 4.5).
 
-    `reason` is necessary for "not evaluated" and "error". `required` is True when the caller
-    named the check for this target (decision 3). `spec_url` links to the specification."""
+    `reason` is necessary for "not evaluated" and "error". For "pass" and "fail" it can give a
+    short detail of the value, for example "axis y" (design section 5.3). `required` is True
+    when the caller named the check for this target (decision 3). `spec_url` links to the
+    specification."""
 
     check_id: str
     spec_version: int

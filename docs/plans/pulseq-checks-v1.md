@@ -79,7 +79,8 @@ decisions 3 to 12 and R1 to R7. The ones that this plan uses most:
 - The worst-case amplitude under rotation is in version 1 (decision 11).
 - The `.asc` reader reads the GPA limits (R5).
 - The specification of the raster check gives the direction of its rule
-  (R6).
+  (R6). In phase 5 the user changed R6: version 1 needs equal rasters and
+  has no raster rule (section 4.7).
 - Moved modules change here first until design step 3 (R7).
 
 ### 2.3 Facts that this plan uses (verified on 2026-09-30)
@@ -471,7 +472,7 @@ tests, `tests/rf_sequences.py`, `tests/plugin_card.py`, the other oracles,
   profile does not give them. `make_opts()` returns `pp.Opts(**opts)`.
 - `hardware_limits`: a `HardwareLimits` from the `Opts` values (decision 8),
   or `None`.
-- `raster_rule`: `"equal"` or `"multiple"`, for each raster.
+- (Removed in phase 5, R6: `raster_rule`. Version 1 needs equal rasters.)
 - `models`: a mapping from a model section name (for example `"pns.safe"`)
   to its parameters.
 - `acoustic_resonances`: a tuple of (frequency, bandwidth) pairs, or `None`.
@@ -503,7 +504,6 @@ GradientRasterTime = 10e-6
 RadiofrequencyRasterTime = 1e-6
 AdcRasterTime = 100e-9
 BlockDurationRaster = 10e-6
-rule = "equal"      # or "multiple" (R6)
 
 [models.pns.safe]   # the fields of the SAFE hardware struct; not with an asc
 # x = { tau1 = ..., ... }, y = ..., z = ...
@@ -652,7 +652,7 @@ the profile applies.
 
 | ID | Module | Measurement | Rule | Inputs | Location |
 |---|---|---|---|---|---|
-| `timing.rasters` | `checks/timing.py` | `seq.definitions` of the file | The specification gives the rule for `equal` and `multiple`, and its direction (R6) | `rasters.*` | None |
+| `timing.rasters` | `checks/timing.py` | `seq.definitions` of the file | Pass when each raster of the file equals the raster of the target, within a relative 1e-8 (R6, changed in phase 5: no rule for unequal rasters in version 1) | `rasters.*` | None |
 | `timing.pypulseq` | `checks/timing.py` | `seq.check_timing()` | Pass when the error list is empty | `opts` (rasters, dead times, ringdown) | The first error block |
 | `gradient.amplitude.axis` | `checks/gradient.py` | `gradient_limits` with the `HardwareLimits` of the target | For each logical axis, pass when the peak is at or below `max_grad * (1 + 1e-9)`; the value is the axis with the largest ratio | `opts.max_grad` | `peak_block`, `peak_time_s` |
 | `gradient.slew.axis` | `checks/gradient.py` | the same | The same, with the slew and `max_slew` | `opts.max_slew` | `slew_block`, `slew_time_s` |
@@ -958,7 +958,8 @@ Section 4.7.
 **Task 5.1.** Tier H. `checks/timing.py`: `timing.rasters` and
 `timing.pypulseq`, with their `CheckSpec`s. The specification of
 `timing.rasters` gives the direction of the `multiple` rule and why a file
-with that raster plays correctly (R6). If the worker cannot justify a
+with that raster plays correctly (R6; in phase 5 the user decided that
+version 1 needs equal rasters, section 4.7). If the worker cannot justify a
 direction from the Pulseq specification (the raster conventions of
 `doc/specification.tex` of MATLAB Pulseq), it stops and reports; the
 executing agent asks the user. `tests/test_check_timing.py`: each raster

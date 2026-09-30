@@ -57,7 +57,6 @@ def make_profile(
         opts=opts,
         hardware_limits=hardware_limits,
         rasters=None,
-        raster_rule=None,
         models={model: {} for model in models},
         acoustic_resonances=None,
         sources={path: "profile" for path in inputs},

@@ -1,4 +1,4 @@
-"""Guards for Pulseq extensions that the report cards do not support."""
+"""Guards for Pulseq extensions that the measurements of this package do not support."""
 
 import pypulseq as pp
 
@@ -8,9 +8,10 @@ _ROTATIONS = "ROTATIONS"  # the extension type name in a .seq file and in pypuls
 def refuse_rotations(seq: pp.Sequence) -> None:
     """Raise `NotImplementedError` when `seq` uses the Pulseq rotation extension.
 
-    The cards that use the gradients show the logical gradient events as they are
-    stored. With a rotation in a block, the gradients on the scanner are different, so
-    these cards would be wrong without a warning. They call this function first.
+    The measurements of the gradients (`grad_limits.gradient_limits` and
+    `pns_levels.pns_levels`) use the logical gradient events as they are stored. With a
+    rotation in a block, the gradients on the scanner are different, so these
+    measurements would be wrong without a warning. They call this function first.
 
     The check reads no block, so its cost does not grow with the number of blocks. It
     finds a rotation in two ways:
@@ -29,8 +30,7 @@ def refuse_rotations(seq: pp.Sequence) -> None:
     library = getattr(seq, "rotation_library", None)
     if (library is not None and len(library.data) > 0) or _ROTATIONS in seq.extension_string_idx:
         raise NotImplementedError(
-            "This sequence uses the Pulseq rotation extension. pulseq-reports does not "
-            "support rotations yet: the gradient cards would show the unrotated "
-            'gradients. See "Rotation extension" in docs/usage.md and the rotation '
-            "item in TODO.md."
+            "This sequence uses the Pulseq rotation extension, which the gradient "
+            "measurements do not support yet: they use the logical gradients as they are "
+            "stored, and a rotation changes the gradients on the scanner."
         )

@@ -177,7 +177,9 @@ Each result has:
 - the state: pass, fail, not evaluated or error,
 - the measured value, the limit and where the value occurs (block and time),
 - the model and its version, when the check uses a model,
-- the reason, when the state is "not evaluated" or "error".
+- the reason, when the state is "not evaluated" or "error". For a pass or a
+  fail, the reason can give a short detail of the value, for example the axis
+  or the raster that gave it.
 
 "Not evaluated" is a state of its own. It is not a pass and not a fail. A
 check gets it when the target profile does not have a necessary field, or
@@ -323,11 +325,13 @@ the decision again.
 `seq.read` keeps the raster times of the file. `check_timing` uses the
 rasters of `seq.system`, which come from the target. A separate check, the
 raster check, compares the rasters that the file declares with the rasters of
-the target. The target profile gives the rule: equal, or an integer multiple.
-The specification of the raster check gives the exact rule: which raster must
-be a multiple of which, and why a file with that raster plays correctly on
-the target. The timing check then runs with the rasters of the target
-(decision 5).
+the target. In version 1, the raster check passes only when each raster of
+the file is equal to the raster of the target (R6). Whether a file with a
+different raster plays correctly depends on how the interpreter of the target
+resamples the gradient and RF shapes, and the Pulseq specification does not
+say. A rule for unequal rasters is a later study, based on the behavior of
+specific interpreters (`TODO.md`). The timing check then runs with the
+rasters of the target (decision 5).
 
 ### 5.11 The target profile format
 
@@ -625,7 +629,7 @@ final, and give `pulseq-report` an opt-in `--fail-on-check` flag.
 |---|---|---|---|
 | 3 | The exit status of "not evaluated" | Status 1 only for a required check (a check that the caller names by ID, for each target or for the targets that the configuration names). A check that is not required and is not evaluated does not change the status. | 5.6 |
 | 4 | The limits of the sequence (`seq.system`) | Only with an explicit opt-in: a keyword argument of the Python function, only when the caller gives a `Sequence` object. No `pulseq-check` flag, no profile entry. The result records the source of the limits. | 5.6 |
-| 5 | The rasters of the file and of the target | A separate raster check. The target profile gives the rule (equal, or an integer multiple). The timing check uses the rasters of the target. | 5.10 |
+| 5 | The rasters of the file and of the target | A separate raster check. In version 1 the rasters must be equal (R6). The timing check uses the rasters of the target. | 5.10 |
 | 6 | The target profile format | A TOML or JSON file that can name a Siemens `.asc` file. A value in both files is an error. The profile file can also give the model parameters (for example SAFE) and the acoustic resonances directly, in a section for each model. An unknown section is ignored and listed. An unknown key in a known section is an error. A new key in a known section raises the format version, and a reader refuses a newer version. | 5.2, 5.11 |
 | 7 | The speed budget | Cost classes (`fast`, `slow`) and a tested budget for the fast checks of the library. The user's condition: other developers must be able to add their own checks easily. The cost class is one field, with the default `slow`. | 5.9 |
 | 8 | `HardwareLimits` | It moves to `pulseq-checks`, and a target profile contains it. `pulseq-reports` exports it again. | 5.2, 9 |
@@ -658,7 +662,7 @@ They are for this repository. Do not open them again.
 | R3 | Statuses 1 and 2 together | Status 1. The output lists each failure. | 5.6 |
 | R4 | Selection by cost class | It does not make a check required. | 5.6 |
 | R5 | The GPA limits in the `.asc` file | The version 1 `.asc` profile reader reads them. | 5.11, 8 |
-| R6 | The direction of the raster rule | The specification of the raster check gives it. | 5.10 |
+| R6 | The direction of the raster rule | Version 1 has no rule for unequal rasters: the rasters of the file must equal the rasters of the target. A rule for unequal rasters must come from the behavior of specific interpreters, not from the Pulseq specification alone (decided 2026-09-30, in phase 5 of the plan). | 5.10 |
 | R7 | The order of step 2.4 and step 1 | Step 2.4 comes before step 1 in pulseq-reports. Until step 3, a moved module changes here first; pulseq-reports changes its copy only for a bug fix, which also comes here. | 7.3, 9 |
 
 Decision R7 changes the order of work of pulseq-reports. The pulseq-reports

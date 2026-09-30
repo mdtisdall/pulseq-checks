@@ -1,5 +1,17 @@
 # TODO
 
+- **Unequal rasters (R6 of `docs/plans/pulseq-checks.md`).** Version 1 of
+  `timing.rasters` passes only when the rasters of the file equal the
+  rasters of the target. A file with a coarser raster (F = k x T) has its
+  block durations, ADC dwell times and event edges on the target raster,
+  but its gradient and RF shapes are samples at the cell centres of F, and
+  the Pulseq specification does not say how an interpreter plays them on T.
+  Study how specific interpreters (for example the Siemens interpreter)
+  handle a file raster that differs from the system raster, and add a rule
+  for unequal rasters only where that behavior is known. A check that is
+  not based on the behavior of an interpreter does not assert anything of
+  value.
+
 - **The convention declaration (decision 10 of
   `docs/plans/pulseq-checks.md`).** Where does a sequence declare its
   coordinate and sign conventions (section 6.2), until the Pulseq community

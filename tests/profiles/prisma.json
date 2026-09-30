@@ -16,21 +16,44 @@
     "GradientRasterTime": 1e-05,
     "RadiofrequencyRasterTime": 1e-06,
     "AdcRasterTime": 1e-07,
-    "BlockDurationRaster": 1e-05,
-    "rule": "equal"
+    "BlockDurationRaster": 1e-05
   },
   "models": {
     "pns": {
       "safe": {
-        "name": "test model",
+        "name": "pypulseq example hardware (not a real scanner)",
         "x": {
-          "a1": 0.5
+          "tau1": 0.2,
+          "tau2": 0.03,
+          "tau3": 3.0,
+          "a1": 0.4,
+          "a2": 0.1,
+          "a3": 0.5,
+          "stim_limit": 30.0,
+          "stim_thresh": 24.0,
+          "g_scale": 0.35
         },
         "y": {
-          "a1": 0.6
+          "tau1": 1.5,
+          "tau2": 2.5,
+          "tau3": 0.15,
+          "a1": 0.55,
+          "a2": 0.15,
+          "a3": 0.3,
+          "stim_limit": 15.0,
+          "stim_thresh": 12.0,
+          "g_scale": 0.31
         },
         "z": {
-          "a1": 0.7
+          "tau1": 2.0,
+          "tau2": 0.12,
+          "tau3": 1.0,
+          "a1": 0.42,
+          "a2": 0.4,
+          "a3": 0.18,
+          "stim_limit": 25.0,
+          "stim_thresh": 20.0,
+          "g_scale": 0.25
         }
       }
     }

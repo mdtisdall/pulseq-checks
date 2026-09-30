@@ -30,7 +30,6 @@ RASTER_OPTS = {
 # The keys of the top level of a profile file, and its sections (plan section 4.3, rule 3).
 _TOP_KEYS = frozenset({"format", "name", "vendor", "asc", "asc_gradient_mode"})
 _SECTIONS = ("opts", "rasters", "models", "acoustic")
-_RASTER_RULES = ("equal", "multiple")
 # The label of the values of the profile file in `TargetProfile.sources`.
 _PROFILE_LABEL = "profile"
 
@@ -45,7 +44,7 @@ class TargetProfile:
 
     A value that no source gives is None (or not in the mapping); the reader supplies no
     default (rule 6). `sources` maps the value path of each value that a source gives
-    ("opts.max_grad", "rasters.GradientRasterTime", "rasters.rule", "models.pns.safe",
+    ("opts.max_grad", "rasters.GradientRasterTime", "models.pns.safe",
     "acoustic.resonances") to "profile" or to the label of the `.asc` reader.
     `hardware_limits` comes from `opts.max_grad` and `opts.max_slew` (both necessary), in
     mT/m and T/m/s, with the label `name`. `rasters` has the reserved names of
@@ -59,7 +58,6 @@ class TargetProfile:
     opts: Mapping[str, Any] | None
     hardware_limits: HardwareLimits | None
     rasters: Mapping[str, float] | None
-    raster_rule: str | None
     models: Mapping[str, Mapping[str, Any]]
     acoustic_resonances: tuple[tuple[float, float], ...] | None
     sources: Mapping[str, str]
@@ -166,9 +164,11 @@ def _read_values(
 
     for key, value in sections.get("rasters", {}).items():
         if key == "rule":
-            if value not in _RASTER_RULES:
-                fail(f"rasters.rule must be one of {list(_RASTER_RULES)}, not {value!r}")
-        elif key not in RASTER_OPTS:
+            fail(
+                "rasters.rule is not a key of [rasters]: the raster check of this version "
+                "needs equal rasters and has no rule"
+            )
+        if key not in RASTER_OPTS:
             fail(f"unknown key {key!r} in [rasters]")
         elif not (_is_number(value) and math.isfinite(value) and value > 0):
             fail(f"rasters.{key} must be a positive number, not {value!r}")
@@ -279,11 +279,7 @@ def read_profile(path: str | Path) -> TargetProfile:
             fail(f"models.{model_name} is not valid: {e}")
 
     opts = {p.removeprefix("opts."): v for p, v in values.items() if p.startswith("opts.")}
-    rasters = {
-        p.removeprefix("rasters."): v
-        for p, v in values.items()
-        if p.startswith("rasters.") and p != "rasters.rule"
-    }
+    rasters = {p.removeprefix("rasters."): v for p, v in values.items() if p.startswith("rasters.")}
     profile = TargetProfile(
         name=name,
         vendor=vendor,
@@ -292,7 +288,6 @@ def read_profile(path: str | Path) -> TargetProfile:
         opts=opts or None,
         hardware_limits=None,
         rasters=rasters or None,
-        raster_rule=values.get("rasters.rule"),
         models=models,
         acoustic_resonances=values.get("acoustic.resonances"),
         sources=sources,

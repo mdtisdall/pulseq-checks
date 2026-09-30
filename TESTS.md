@@ -32,7 +32,8 @@ Contents:
 2. [Tests](#2-tests): the package; the shared sequence helpers, the sequence
    index, the raster sampler and the sequence extensions; the analyses (PNS and
    the PNS levels, and the gradient limits); the target profile, the results,
-   the run function and the check configuration
+   the run function and the check configuration; the Siemens `.asc` profile
+   reader; the version 1 checks (timing, gradient and PNS)
 
 ---
 
@@ -495,7 +496,7 @@ compared with a plain `pns_levels(seq)` call (`numpy.array_equal` for the arrays
 #### `test_pns_levels_refuses_rotations`
 
 **Checks:** `pns_levels` raises `NotImplementedError` for a sequence with a
-rotation library, as the gradient cards do.
+rotation library, as `gradient_limits` does.
 
 **How:** `gre_sequence(num_trs=2)` with a non-empty `rotation_library` (the
 technique of `test_extensions.py`'s `_with_rotation_library`), inside
@@ -1563,6 +1564,17 @@ compares `whole_rms_mt_per_m` against a fresh whole-file oracle call.
   explicitly to keep every event zero-ended. This is a fact about pypulseq, not about the
   function under test, and is not itself checked here.
 
+#### `test_gradient_limits_refuses_rotations`
+
+**Checks:** `gradient_limits` raises `NotImplementedError` for a sequence with a
+rotation library.
+
+**How:** `gre_sequence(num_trs=2)` with a non-empty `rotation_library` (the
+`_with_rotation_library` helper of `test_extensions.py`), inside
+`pytest.raises(NotImplementedError, match="rotation extension")`.
+
+**Assumptions:** None.
+
 ### 2.7 PNS prediction (`test_pns.py`)
 
 `test_pns.py` tests `pns.py`. `PnsPrediction` is now summary-only (`reason`,
@@ -1940,8 +1952,10 @@ the same order. It checks that there were 3 calls.
 and methods of `TargetProfile`. The example profiles are in `tests/profiles/`:
 `prisma.toml` and `prisma.json` (the example of plan section 4.3 without `asc`),
 `minimal.toml`, `hz_units.toml`, `unused.toml` and `with_asc.toml`. The other profiles
-are written in `tmp_path`. The tests do not use an installed model or an installed
-reader: an autouse fixture replaces `registry.models` (one test model, "pns.safe", that
+are written in `tmp_path`. The SAFE sections of the example files have the parameters of
+pypulseq's example hardware (`safe_example_hw`), not of a real scanner. Except one test,
+the tests do not use an installed model or an installed reader: an autouse fixture
+replaces `registry.models` (one test model, "pns.safe", that
 has the keys of the SAFE model and checks only the names) and `registry.profile_reader`
 (no reader), and a test that needs the reader "siemens-asc" installs a test reader,
 which returns sections and sources that the test gives. No test reads real `.asc` data.
@@ -1963,11 +1977,11 @@ The test does not check that the two files have the same text in another form.
 
 #### `test_the_example_of_plan_section_4_3_reads_to_the_expected_values`
 
-**Checks:** The example of plan section 4.3 (without `asc`, with a test SAFE-like model)
-reads to the values that the file gives, in every field of `TargetProfile`.
+**Checks:** The example of plan section 4.3 (without `asc`, with the test model in place
+of the SAFE model) reads to the values that the file gives, in every field of `TargetProfile`.
 
 **How:** The test reads `prisma.toml` and compares `name`, `vendor`, `format_version`,
-`opts`, `rasters`, `raster_rule`, `models` (the return value of the test model),
+`opts`, `rasters`, `models` (the return value of the test model),
 `acoustic_resonances` (a tuple of float pairs) and `unused_sections` with values written
 in the test. It checks that `hardware_limits` exists and has the profile name as its
 label.
@@ -1988,6 +2002,19 @@ both to None.
 **Assumptions:** This is the round trip between the two formats. The test does not write
 a profile back to a file, because `read_profile` is the only function that the plan
 gives for files.
+
+#### `test_an_example_file_reads_with_the_installed_models`
+
+**Checks:** Each example profile (`prisma`, `minimal`, `hz_units`, `unused`) is valid for
+the models that this package installs, and the SAFE sections of `prisma.toml` and
+`unused.toml` read to the parameters of pypulseq's example hardware.
+
+**How:** The test sets `registry.models` back to the function of the package (the
+autouse fixture replaced it with the test model), reads each file with `read_profile`,
+and compares `models` for the two files that have a SAFE section.
+
+**Assumptions:** The entry point of `pns_levels.SAFE_MODEL` is installed (`uv sync` after
+the change of `pyproject.toml`). `with_asc.toml` is not read: it needs an `.asc` file.
 
 #### `test_the_path_can_be_a_string_and_source_path_is_resolved`
 
@@ -2193,22 +2220,15 @@ gives each to the matching `pp.Opts` attribute.
 
 **Assumptions:** None.
 
-#### `test_the_raster_rule_is_read`
+#### `test_a_raster_rule_is_an_error_because_the_check_needs_equal_rasters`
 
-**Checks:** `rasters.rule` "equal" and "multiple" are read into `raster_rule`, and the
-rule is in `sources`, and it is not in `rasters`.
+**Checks:** A `rasters.rule` ("equal" or "multiple") is a `ProfileError`, because
+version 1 has no rule: the message names `rasters.rule` and says that the raster check
+needs equal rasters. A profile made for a later version that asks for "multiple" is
+refused, not checked for equality in silence.
 
 **How:** The test is parametrized over the two rules. It writes a profile with only the
-rule.
-
-**Assumptions:** None.
-
-#### `test_another_raster_rule_is_an_error`
-
-**Checks:** A `rasters.rule` that is not "equal" or "multiple" (a different string, an
-empty string, a number, null) is a `ProfileError`.
-
-**How:** The test is parametrized over four values and calls `read_profile`.
+rule and matches the message of the error.
 
 **Assumptions:** None.
 
@@ -2420,8 +2440,8 @@ with `gamma = 10e6`, and compares the limits and `make_opts().max_grad`.
 #### `test_a_profile_with_the_name_only_has_no_default_value`
 
 **Checks:** Rule 6: a profile with `format` and `name` only has None for `opts`,
-`rasters`, `raster_rule`, `hardware_limits`, `vendor` and `acoustic_resonances`, and
-empty `models`, `sources` and `unused_sections`.
+`rasters`, `hardware_limits`, `vendor` and `acoustic_resonances`, and empty `models`,
+`sources` and `unused_sections`.
 
 **How:** The test compares the whole profile with a `TargetProfile` that it makes.
 
@@ -2439,7 +2459,7 @@ no source and None (not an empty mapping) for the optional fields.
 #### `test_the_sources_name_each_value_that_the_profile_gives`
 
 **Checks:** For `prisma.toml`, `sources` has each value path (`opts.<key>` for each key,
-`rasters.<name>` for the four names, `rasters.rule`, `models.pns.safe`,
+`rasters.<name>` for the four names, `models.pns.safe`,
 `acoustic.resonances`) with the label "profile", and no other.
 
 **How:** The test builds the list of value paths from `opts` and `RASTER_OPTS` and
@@ -2489,11 +2509,11 @@ the real ones.
 #### `test_the_sections_of_the_asc_reader_are_merged_with_the_values_of_the_profile`
 
 **Checks:** The sections of the reader (`opts`, `models`, `acoustic`) and the values of
-the profile (other `opts` keys, a raster and the rule) give one profile.
+the profile (other `opts` keys and a raster) give one profile.
 
 **How:** The test installs a test reader with sections and sources, reads a profile that
-gives `B0`, a raster and the rule, and compares `opts`, `rasters`, `raster_rule`,
-`acoustic_resonances` and `models`.
+gives `B0` and a raster, and compares `opts`, `rasters`, `acoustic_resonances` and
+`models`.
 
 **Assumptions:** The test model and the test reader are classes in the test file, not
 the real ones.
@@ -3555,5 +3575,562 @@ of `read_profile` as a `ProfileError` that names the `.asc` file.
 
 **How:** The test writes the `.asc` file and a profile with `asc_gradient_mode =
 "nominal"`, and matches the file name in the message.
+
+**Assumptions:** None.
+
+### 2.13 Timing checks (`test_check_timing.py`)
+
+These tests cover the two timing checks of `checks/timing.py`: `timing.rasters` (`RASTERS`)
+and `timing.pypulseq` (`PYPULSEQ`). They do not use the installed checks and do not need
+the other checks of the package: the tests replace `registry.check_rules` with monkeypatch
+so that it gives the two timing checks only, and they select one check with `select`. A
+few tests call `rule.run` directly with a `RunContext` that they build. The sequence is a
+`.seq` file that a test writes in `tmp_path` with `seq.write`: a delay of 1 ms, an RF
+pulse with a delay of 100 µs, a delay of 2 ms and a second RF pulse (from
+`block_pulse` of `tests/synthetic.py`). It has no gradient and no ADC. The raster tests
+change the [DEFINITIONS] entries of the file before they write it, because the check
+reads only the declared values. The targets are `TargetProfile` objects that the tests
+build directly (`make_target`), with the rasters 10 µs (gradient), 1 µs (RF), 100 ns (ADC)
+and 10 µs (block duration), and the RF dead time 100 µs, RF ringdown 20 µs and ADC dead
+time 10 µs, unless a test says otherwise.
+
+#### `test_equal_rasters_pass`
+
+**Checks:** With a file that declares the rasters of the target, the result is "pass"
+with the unit `s` and no location. Its value is the gradient raster of
+the file, its limit the gradient raster of the target, and its reason (the detail of a
+pass or a fail) starts with `GradientRasterTime: `.
+
+**How:** The test writes the file with the four rasters of the target, runs
+`timing.rasters` through `run_checks`, and checks the fields of the result.
+
+**Assumptions:** When the deviations of all rasters are equal, the result shows the first
+raster (the gradient raster). The test checks only the start of the reason text.
+
+#### `test_equal_rasters_fail_when_one_raster_differs`
+
+**Checks:** A file where one of the four rasters is 1.5 times the raster of the target
+gives "fail", with the file raster as the value and the target raster as the limit. The
+test does this for each raster.
+
+**How:** For each of the four names, the test writes a file where that raster is 1.5 times
+the target value, and runs the check. It checks the state, the value (to the nine digits
+that the file keeps), the limit, the unit, the location, and that the reason starts with
+the name of that raster.
+
+**Assumptions:** The gradient raster and the block duration raster of the target are both
+10 µs, so for these two names the test does not tell which of the two the result shows.
+The test with the worst raster tells it apart.
+
+#### `test_the_worst_raster_is_the_one_with_the_largest_deviation`
+
+**Checks:** When two rasters differ, the value and the limit of the result are those of the
+raster with the largest relative deviation.
+
+**How:** The test writes a file where the gradient raster is 1.1 times the target value and
+the ADC raster is 1.5 times. It checks the "fail" state, and that the value is the ADC
+raster of the file (150 ns) and the limit the ADC raster of the target (100 ns).
+
+**Assumptions:** The deviation is the relative one of the specification, so the ADC raster
+(0.5) is worse than the gradient raster (0.1) although both differences in seconds are
+small.
+
+#### `test_rasters_fail_when_the_file_raster_is_a_ratio_other_than_one`
+
+**Checks:** A file raster that is half, two times or three times the raster of the target
+gives "fail", for each of the four rasters, with the file raster as the value and the
+target raster as the limit. Version 1 has no rule for unequal rasters, so neither a
+finer raster nor an integer multiple passes.
+
+**How:** The test is parametrized over the three ratios and the four names. It writes a
+file where that raster is the ratio times the target value (the others are equal), runs
+the check, and checks the state "fail", the value (to the nine digits that the file keeps)
+and the limit.
+
+**Assumptions:** None.
+
+#### `test_the_tolerance_of_a_raster_is_relative_1e_8`
+
+**Checks:** A file raster that differs from the target raster by a relative 5e-9 (the
+rounding of a nine-digit definition) passes, and one that differs by 1e-7 fails, in both
+directions.
+
+**How:** The test sets the four definitions of a `pp.Sequence` to the target values times
+a factor (1 ± 5e-9 and 1 ± 1e-7), runs `RASTERS.run` with a `RunContext`, and checks the
+state.
+
+**Assumptions:** The test sets the definitions in the object and does not write a file, so
+it does not test the nine-digit rounding of the file itself. The tolerance is 1e-8.
+
+#### `test_a_raster_that_the_file_does_not_declare_gives_error`
+
+**Checks:** A file that does not declare one of the four rasters gives "error" with a
+reason that names the raster, and no value and no limit. The test does this for each
+raster.
+
+**How:** For each name, the test removes that definition from the sequence before it writes
+the file, runs the check, and checks the state, that the name is in the reason, and that
+the value and the limit are None.
+
+**Assumptions:** The test writes a file of format 1.5.0, where the four definitions are
+required. A file of a format older than 1.4.0 is not tested: pypulseq fills its missing
+definitions with the rasters of the target when it reads the file, so the check cannot see
+the missing declaration (see the specification of `timing.rasters`). pypulseq warns for a
+missing block duration raster, and the test ignores this warning.
+
+#### `test_a_declared_raster_that_is_not_one_positive_number_gives_error`
+
+**Checks:** A declared raster that is a string, a list of two numbers, zero, negative,
+"not a number" or infinite gives "error" with a reason that names the raster.
+
+**How:** For each value, the test sets the gradient raster definition of a `pp.Sequence`
+to it and runs `RASTERS.run` with a `RunContext`. It checks the state and that the name is
+in the reason.
+
+**Assumptions:** The test sets the values in the object and does not write a file, because
+pypulseq uses a declared raster when it reads the file. The other three definitions are
+not set, so the reason also names them as not declared; the test checks only that it names
+the gradient raster, and not its complete text.
+
+#### `test_rasters_are_not_evaluated_without_a_target_raster`
+
+**Checks:** A target that does not give one of the four rasters gives "not evaluated"
+with a reason that names the missing input and no value.
+
+**How:** For each of the four inputs, the test builds a target without it and runs
+`timing.rasters` through `run_checks`. It checks the state, that the reason names the
+input, and that the value is None.
+
+**Assumptions:** The run function gives the state before it calls `run`. The test does not
+check that `run` is not called (`test_run.py` does).
+
+#### `test_timing_errors_depend_on_the_target`
+
+**Checks:** One file gives no timing error for a target with an RF dead time of 100 µs and
+timing errors for a target with 200 µs. The value of the failing result is the number of
+errors, the limit is 0, and the unit is None.
+
+**How:** The test runs `timing.pypulseq` through `run_checks` on the file with two targets
+that differ in `opts.rf_dead_time`, so that the run function reads the file one time for
+each target. The RF pulses of both RF blocks have a delay of 100 µs. The test checks the
+first result (pass, value 0, limit 0, no unit, no location, no reason) and the second
+(fail, two errors, limit 0, no unit, and a reason that starts with
+`first of 2 errors: block 2`).
+
+**Assumptions:** `check_timing` gives one error for each of the two blocks. The test does
+not check the other error types of `check_timing`; pypulseq tests them.
+
+#### `test_the_location_is_the_first_error_block_and_its_start_time`
+
+**Checks:** The location of a failing result is the block ID of the first error and the
+start time of that block.
+
+**How:** The test runs the check for the target with an RF dead time of 200 µs. The first
+block (a delay) has no error, so the first error is in block 2, which starts at 1 ms. The
+test compares the location with block 2 and 1 ms.
+
+**Assumptions:** The start time is the sum of the block durations of `sequence_index`. The
+block IDs are the pypulseq block numbers, from 1.
+
+#### `test_timing_pypulseq_is_not_evaluated_without_an_input`
+
+**Checks:** A target without one of the four rasters, the RF dead time, the RF ringdown or
+the ADC dead time gives "not evaluated" for `timing.pypulseq`, with a reason that names the
+input.
+
+**How:** For each of the seven inputs, the test builds a target without it, runs the check
+through `run_checks`, and checks the state, the reason and that the value is None.
+
+**Assumptions:** The file has no ADC. The check still needs `opts.adc_dead_time`, so that
+a default of pypulseq is never used (see its specification).
+
+#### `test_check_timing_does_not_change_the_sequence`
+
+**Checks:** `timing.pypulseq` leaves the sequence as it was: the block events, the block
+durations, the definitions, the `use_block_cache` setting and an empty block cache.
+
+**How:** The test reads the file with the `Opts` of a target, copies the block events, the
+block durations and the definitions, runs `PYPULSEQ.run` with a `RunContext` for a target
+with a timing error, and compares each of them with the copy. It checks that the block
+cache is empty.
+
+**Assumptions:** `Sequence.check_timing` alone fills the block cache (one entry for each
+block); the check turns the cache off. The test does not compare the event libraries or
+the shapes.
+
+#### `test_each_field_of_a_spec_is_set`
+
+**Checks:** The `CheckSpec` of each timing check has the version 1, the cost class
+`slow`, no URL, no models, a text in each of `title`, `quantity`, `limit`, `tolerance` and
+`pass_condition`, and inputs with no duplicate.
+
+**How:** The test reads the fields of `RASTERS.spec` and `PYPULSEQ.spec`.
+
+**Assumptions:** The test does not check the content of the texts, only that they are not
+empty. The cost class `slow` is the value before the classes of phase 8.
+
+#### `test_the_ids_and_inputs_of_the_specs`
+
+**Checks:** The IDs are `timing.rasters` and `timing.pypulseq`. The inputs of the raster
+check are the four raster paths. The inputs of the pypulseq check are the four raster
+paths and `opts.rf_dead_time`, `opts.rf_ringdown_time` and `opts.adc_dead_time`. The
+pypulseq function is `Sequence.check_timing` for the second check and None for the first.
+
+**How:** The test compares the fields with the expected values. The raster paths come from
+`RASTER_OPTS` of `profile.py`.
+
+**Assumptions:** The inputs of the pypulseq check are the values that `check_timing` of the
+pinned pypulseq reads from `seq.system` (the four rasters, the two RF times and the ADC
+dead time). A newer pypulseq that reads more values needs a change here and in the
+specification.
+
+### 2.14 Gradient checks (`test_check_gradient.py`)
+
+These tests check the three gradient check rules of `checks/gradient.py`:
+`gradient.amplitude.axis`, `gradient.slew.axis` and `gradient.amplitude.any-orientation`.
+The tests call a rule directly with a `RunContext` (`run_one`), or through `run_checks`
+with `registry.check_rules` replaced by monkeypatch, so that they do not need the other
+checks of the package or the installed entry points. The targets are `TargetProfile`
+objects that the test builds (`make_profile`), with limits in mT/m and T/m/s. The
+sequences are small sequences that the test builds with pypulseq: trapezoids of a known
+amplitude and with the rise time 100 µs, so that an amplitude of x mT/m has the slew
+10 · x T/m/s. The sequences use a system with the limits 100 mT/m and 1000 T/m/s, which
+are larger than the limits of the profiles, so that a sequence can be above the limit of
+a profile. Each expected value is computed by hand from the parameters of the
+trapezoids, not by calling `gradient_limits`. Where a test needs a value that is exactly
+the limit (at the limit, and around the tolerance), it takes the value from a first run
+of the same check with a limit that the sequence does not reach, and sets the limit from
+that value. Some of the tests use a table of three cases (`CASES`): each case is one rule
+with a sequence whose value, unit and location are known (for the amplitude rule 20
+mT/m, for the slew rule 200 T/m/s, in both cases the trapezoid in block 3 of a sequence
+with two earlier blocks; for the vector rule x and y at 12 mT/m at the same time in
+block 3, so |G| = 12 · sqrt(2) mT/m).
+
+#### `test_below_the_limit_passes_with_the_value_the_limit_and_the_unit`
+
+**Checks:** For each of the three rules, a value below the limit gives the state "pass",
+the value of the measurement, the limit of the target and the unit of the rule (mT/m, or
+T/m/s for the slew), and the detail of the value as its reason: `axis x` for the two
+axis rules, none for the vector rule.
+
+**How:** The test runs the rule on the sequence of its case with the limit twice the
+expected value. It checks the state, the value against the hand-computed one
+(`pytest.approx`), that the limit is the one of the profile, the unit and the reason.
+
+**Assumptions:** The limit that the case does not use is very large, so that it does not
+matter.
+
+#### `test_a_value_equal_to_the_limit_passes`
+
+**Checks:** A value that is exactly the limit passes.
+
+**How:** The test runs the rule with a very large limit and takes the value of the
+result. It runs the rule again with that value as the limit, and checks that the value
+and the limit are equal and that the state is "pass".
+
+**Assumptions:** The value of the first run is the same as the one of the second run,
+because the sequence and the measurement are the same. The test does not check the value
+against a hand-computed one (other tests do).
+
+#### `test_a_value_within_the_tolerance_above_the_limit_passes`
+
+**Checks:** A value above the limit by less than the relative tolerance 1e-9 passes
+(decision 5 of the plan).
+
+**How:** The test takes the value of a run with a very large limit, and sets the limit to
+`value / (1 + 5e-10)`: the value is then 5e-10 of the limit above it. It checks that the
+value is above the limit and that the state is "pass".
+
+**Assumptions:** The test does not check the exact bound: a value above the limit by
+1e-9 is not tried. The next test checks a value above the tolerance.
+
+#### `test_a_value_above_the_limit_by_more_than_the_tolerance_fails`
+
+**Checks:** A value above the limit by more than the tolerance gives "fail", with the
+value, the limit and the same reason as a pass. This holds for a value that is just
+above the tolerance (2e-9 of the limit) and for one that is clearly above (10 %).
+
+**How:** The test takes the value of a run with a very large limit, and sets the limit to
+`value / factor` for each of the two factors `1 + 2e-9` and 1.1. It checks the state, the
+value, the limit and the reason of the result.
+
+**Assumptions:** None.
+
+#### `test_the_location_is_the_block_and_the_time_of_the_value`
+
+**Checks:** The location of the result is the block ID and the time of the value: for
+the amplitude and the vector rules, the first time where the peak is reached (the end of
+the rise of the trapezoid), and for the slew rule, the start of the steepest segment
+(the start of the rise).
+
+**How:** Each case has a sequence with a smaller trapezoid in block 1, a delay of 1 ms in
+block 2 and the trapezoid of the value in block 3. The block starts at the duration of
+block 1 (500 µs) plus the delay, and the test adds the rise time of 100 µs for the
+amplitude and the vector rules. It checks that the block is 3 and the time, with a
+tolerance of 1 ns.
+
+**Assumptions:** The block IDs are the pypulseq IDs, which start at 1.
+
+#### `test_the_axis_with_the_largest_ratio_gives_the_value`
+
+**Checks:** For the amplitude rule and the slew rule, the value is the peak of the axis
+with the largest ratio of the peak to the limit, which has the largest peak because the
+limit is the same for each axis: the state, the value, the limit and the location are the
+ones of that axis. A sequence whose other axes are below the limit gives "pass" with the
+same value, and a limit below the peak of that axis gives "fail".
+
+**How:** The test builds three blocks: x at 10 mT/m, y at 18 mT/m and z at 14 mT/m (slew
+100, 180 and 140 T/m/s). It runs each rule with a limit below (16 mT/m, 160 T/m/s) and a
+limit above (20 mT/m, 200 T/m/s) the peak of y. The value must be the one of y (18 mT/m,
+180 T/m/s) with the state "fail", respectively "pass", the location the block 2 and its
+time, and the reason `axis y`.
+
+**Assumptions:** None.
+
+#### `test_two_axes_with_the_same_peak_give_the_first_axis_in_x_y_z_order`
+
+**Checks:** When two axes have the same peak, the value and the location are the ones of
+the first axis in the order x, y, z, and not those of the earlier block.
+
+**How:** The test builds y at 15 mT/m in block 1 and x at 15 mT/m in block 2, and runs the
+amplitude rule and the slew rule. The location must be block 2 (x), and the reason
+`axis x`.
+
+**Assumptions:** The two trapezoids are made with the same parameters, so that their
+peaks and slew rates are exactly equal.
+
+#### `test_the_vector_peak_is_above_the_limit_when_each_axis_is_below_it`
+
+**Checks:** With x and y each at 0.8 of the amplitude limit at the same time, the
+amplitude rule passes and the any-orientation rule fails.
+
+**How:** The test builds one block with x and y trapezoids at 16 mT/m, with the limit 20
+mT/m. It checks that the amplitude rule passes with the value 16 mT/m, and that the
+any-orientation rule fails with the value 16 · sqrt(2) = 22.6 mT/m and the limit 20
+mT/m. Both locations are block 1.
+
+**Assumptions:** None.
+
+#### `test_a_sequence_with_no_gradient_passes_with_the_value_0_and_no_location`
+
+**Checks:** For each rule, a sequence with no gradient event gives "pass", the value 0.0,
+the limit and the unit of the rule, and no location.
+
+**How:** The test runs each rule on `empty_sequence()` (one delay block) and checks the
+state, the value, the location, the limit and the unit.
+
+**Assumptions:** None.
+
+#### `test_a_value_of_0_has_no_location`
+
+**Checks:** When the largest value is 0 but the sequence has a gradient event, the result
+is "pass" with the value 0.0 and no location, for each rule.
+
+**How:** The test builds one block with a y trapezoid that `pp.scale_grad` scales to the
+amplitude 0. The measurement has an event but credits no block. The test checks the state,
+the value and that the location is None.
+
+**Assumptions:** `gradient_limits` credits no block for the value 0 (tested in
+`test_grad_limits.py`).
+
+#### `test_a_value_with_no_block_has_a_location_with_the_time_only`
+
+**Checks:** When the measurement gives a value above 0 and no block, the location of the
+amplitude rule and of the any-orientation rule has the time and the block None.
+
+**How:** The test replaces `gradient_limits` in the check module with a function that
+gives a `GradientLimits` made by hand, with the peak 5 mT/m at 0.25 s and no block, and
+checks the value and that the location is `Location(block=None, time_s=0.25)`.
+
+**Assumptions:** A real measurement does not give this result, so the test uses a made
+result. It tests the rule of the check only.
+
+#### `test_a_target_with_one_limit_gives_not_evaluated_for_the_checks_of_the_other`
+
+**Checks:** With `run_checks`, a target with only `opts.max_grad` gets results for the two
+amplitude rules (with the limit converted from the profile) and "not evaluated" for the
+slew rule, with a reason that names `opts.max_slew`. A target with only `opts.max_slew`
+gets the reverse. A target with neither gets "not evaluated" for the three rules.
+
+**How:** The test runs the three rules on a sequence for the three targets, and checks
+the state of each result, the limit of the results that ran (`pytest.approx`) and the
+reason of the slew result.
+
+**Assumptions:** None.
+
+#### `test_a_target_with_one_limit_gives_the_other_as_nan_and_its_name_as_the_label`
+
+**Checks:** For a target with only `opts.max_grad`, the rules call `gradient_limits` with
+`HardwareLimits` that has the limit from the `pp.Opts` of the target (in mT/m, with the
+gamma of that Opts), nan for the other limit, and the name of the target as the label. The
+limits are not None.
+
+**How:** The test spies on `gradient_limits` in the check module (the spy calls the real
+function and keeps its keyword arguments), runs the three rules on a target with
+`max_grad` 20 mT/m and `gamma` 40 MHz/T, and checks the limits of the only call: the limit
+is 20 mT/m (with 42.576 MHz/T it would be 18.8), the other one is nan and the label is
+the name of the target.
+
+**Assumptions:** `gradient_limits` uses `limits` only as a label (checked in its code, not
+by this test), so a nan limit does not change the numbers.
+
+#### `test_a_target_with_only_max_slew_gives_max_grad_as_nan`
+
+**Checks:** The same for a target with only `opts.max_slew`: the slew limit is in T/m/s,
+the amplitude limit is nan, and the label is the name of the target.
+
+**How:** The same spy, with a target with `max_slew` 300 T/m/s. It checks the limits of
+the call.
+
+**Assumptions:** The same as in the test above.
+
+#### `test_the_three_checks_share_one_measurement_for_each_target`
+
+**Checks:** For a `.seq` file and two targets, `gradient_limits` runs one time for each
+target (two times for the three rules, not six), always over the whole file (no window)
+and with the hardware limits of that target, never with None.
+
+**How:** The test writes a `.seq` file, runs the three rules for two targets with
+different limits and the spy on `gradient_limits`. It checks that all six results are
+"pass", that there are two calls, that the keyword arguments of each call are only
+`limits`, and that the limits are `hardware_limits` of the target, in the order of the
+targets.
+
+**Assumptions:** `run_checks` reads the file one time for each target (tested in
+`test_run.py`).
+
+#### `test_the_three_checks_of_one_target_call_gradient_limits_one_time`
+
+**Checks:** For a `Sequence` object and one target, the three rules call `gradient_limits`
+one time, with the hardware limits of the target.
+
+**How:** The test runs the three rules with the spy and checks that there is one call and
+that its `limits` is the `hardware_limits` of the profile.
+
+**Assumptions:** None.
+
+#### `test_limits_from_sequence_uses_the_limits_of_seq_system`
+
+**Checks:** With `limits_from_sequence=True`, a `Sequence` object and a target with no
+limits, the three rules run and compare with the limits of `seq.system`, 28 mT/m and
+150 T/m/s.
+
+**How:** The test builds an x trapezoid at 20 mT/m with the rise time 200 µs (slew
+100 T/m/s) with the `SYSTEM` of `tests/synthetic.py`, and runs the rules on a target that
+gives no value. It checks that the three results are "pass", and their values and limits:
+20 and 28 mT/m for the two amplitude rules, and 100 and 150 T/m/s for the slew rule.
+
+**Assumptions:** The limits of `SYSTEM` are 28 mT/m and 150 T/m/s. The conversion of the
+units of `seq.system` is tested in `test_run.py`, not here.
+
+#### `test_a_rotation_gives_error_for_the_three_checks`
+
+**Checks:** For a sequence that uses the rotation extension, each of the three rules gives
+the state "error" with a reason that starts with `NotImplementedError`, and no value.
+
+**How:** The test gives a sequence a non-empty `rotation_library` (the way pypulseq draft
+PR #372 stores rotations, as `tests/test_extensions.py` does) and runs the three rules
+with `run_checks`. It checks the state, the reason and that the value is None.
+
+**Assumptions:** The test uses a rotation library that is set by hand: pypulseq 1.5.0.post1
+cannot make a rotation, and its `Sequence.read` raises `ValueError` for a file with one
+(the run function makes that an error of the run, not a result). The test does not cover a
+later pypulseq that stores a rotation in another way (see `refuse_rotations`).
+
+#### `test_the_spec_sets_each_field`
+
+**Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
+cost class `"slow"`, `url` None, no model, the expected input (`opts.max_slew` for the slew
+rule, `opts.max_grad` for the other two), and a non-empty title, quantity, limit,
+tolerance and pass condition.
+
+**How:** The test compares each field, and checks that each of the five texts is a string
+with a character that is not white space.
+
+**Assumptions:** The test does not check the text of the specification: a person reads it
+in `docs/checks.md` (phase 6). It does not check the entry points in `pyproject.toml`.
+
+### 2.15 PNS check (`test_check_pns.py`)
+
+These tests cover the check rule `pns.safe` (`checks/pns.py`). They run it through
+`run_checks` with a `.seq` file or a `Sequence` object, and with `registry.check_rules`
+replaced by a function that gives only this check, so that they do not need the other
+checks. The profiles name a synthetic `.asc` file from the `write_gradient_asc` fixture,
+whose `limit_scale` sets the stimulation limits: a large scale gives a pass and a small one
+a fail. The sequences are small.
+
+#### `test_no_safe_parameters_gives_not_evaluated`
+
+**Checks:** A profile without `models.pns.safe` gives the state "not evaluated", with a
+reason that names `pns.safe`, and no value.
+
+**How:** The test reads a profile with a name only and runs the check on a `.seq` file.
+
+**Assumptions:** The run function makes the result before it calls `run`.
+
+#### `test_the_peak_against_the_stimulation_limit`
+
+**Checks:** With a large `limit_scale` the state is "pass", and with a small one it is
+"fail". The value is 100 times the peak of `pns_levels_for` with the same hardware, the
+limit is 100.0, the unit is `%`, the model is `pns.safe` with `SAFE_MODEL.version`, and
+the check ID and the specification version are those of the spec.
+
+**How:** The test writes the `.asc` file and a profile that names it, reads the profile,
+and runs the check on a two-repetition gradient-echo `.seq` file. It compares the value
+exactly with 100 times the peak of `pns_levels_for` for the same file, read with the
+`Opts` of the profile as `run_checks` reads it, with `hardware` from the profile.
+
+**Assumptions:** The two scales are far from the limit, so the states do not depend on the
+rounding of the values in the file.
+
+#### `test_the_location_is_the_block_of_the_peak`
+
+**Checks:** The location has the time `PnsLevels.peak_time_s`, and the block ID of the last
+block that starts at or before that time (`sequence_index`). The time is inside that
+block.
+
+**How:** The test runs the failing case and computes the block from `sequence_index` and
+`pns_levels_for` itself.
+
+**Assumptions:** The object and the file give the same block starts.
+
+#### `test_safe_parameters_in_the_profile_file_match_the_asc_file`
+
+**Checks:** SAFE parameters written in `[models.pns.safe]` of the profile (the values of
+`safe_example_hw()`, with the two stimulation fields scaled) give the same parameters as
+the `.asc` file with that scale, and the same state, value and location.
+
+**How:** The test builds the TOML text from `safe_example_hw()` in a second directory,
+reads both profiles and compares their SAFE parameters and their results.
+
+**Assumptions:** The `.asc` fixture writes the values of `safe_example_hw()` with the
+stimulation limit and threshold multiplied by `limit_scale`.
+
+#### `test_a_rotation_gives_error`
+
+**Checks:** A `Sequence` object with a `rotation_library` gives the state "error", and the
+reason names `NotImplementedError`.
+
+**How:** The test builds the object with the helper of `test_extensions.py` and runs the
+check on it.
+
+**Assumptions:** The check does not catch the exception of `pns_levels`.
+
+#### `test_a_sequence_without_gradients_passes_with_zero`
+
+**Checks:** A sequence with a delay block only gives "pass", value 0.0, no location, and
+the model and its version.
+
+**How:** The test runs the check on `empty_sequence()`, with the failing scale.
+
+**Assumptions:** None.
+
+#### `test_the_spec_gives_each_field`
+
+**Checks:** The ID is `pns.safe`, the version is 1, `models` is `("pns.safe",)`, `inputs`
+is empty, `cost` is "slow", `url` is None, the other text fields are not empty, and
+`pypulseq` names `_safe_gwf_to_pns_chunk`.
+
+**How:** The test reads the fields of `SAFE.spec`.
 
 **Assumptions:** None.
