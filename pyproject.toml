@@ -12,6 +12,9 @@ dependencies = [
     "scipy",
 ]
 
+[project.entry-points."pulseq_checks.profile_readers"]
+siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

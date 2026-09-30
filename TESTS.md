@@ -3334,3 +3334,226 @@ a `ConfigError` that names the file.
 checks the exceptions and that the messages have the path.
 
 **Assumptions:** None.
+
+### 2.12 Siemens .asc profile reader (`test_asc_profile.py`)
+
+These tests cover `asc_profile.read_asc_profile` for the SAFE parameters, the acoustic
+resonances and the GPA limits of a `gradient_mode`. They use the `write_gradient_asc`
+fixture of `tests/conftest.py`, which writes synthetic values with the PNS parameters of
+pypulseq's example hardware (and, with its `gpa` keyword, synthetic amplitudes and rise
+times for each mode), and lines that the tests append with synthetic resonances and GPA
+fields. No test uses a real `.asc` file.
+
+The reader supplies no default (decision R2): a group of values that the file has in part
+(SAFE fields without all of them or without the gradient scale factors, a resonance without
+its bandwidth) and a mode that the file does not have are a `ValueError`.
+
+The last four tests read a profile file with `profile.read_profile`, which calls the
+installed reader `siemens-asc` (plan section 4.3, rule 4, and section 4.9).
+
+#### `test_read_asc_profile_gives_the_safe_parameters`
+
+**Checks:** For the plain layout and for the split layout (an `ASCCONV` block with CRLF
+line ends and a `$INCLUDE` file), the sections are `models.pns.safe` only, with `name`
+and, for each of `x`, `y` and `z`, the nine float fields of `safe_example_hw()`. The
+sources map `models.pns.safe` to the file name.
+
+**How:** The test writes the file with the fixture, for each layout, and compares the
+result of `read_asc_profile` with a dict that it builds from `safe_example_hw()`.
+
+**Assumptions:** The fixture writes the values of `safe_example_hw()` with `repr`, so
+that they read back exactly.
+
+#### `test_read_asc_profile_with_a_missing_include_file_is_an_os_error`
+
+**Checks:** A `$INCLUDE` file that is not in the directory is an `OSError`.
+
+**How:** The test writes the split layout, deletes the included `_GSWD_SAFETY.asc` file,
+and calls `read_asc_profile`.
+
+**Assumptions:** `FileNotFoundError` is a subclass of `OSError`.
+
+#### `test_read_asc_profile_gives_the_acoustic_resonances`
+
+**Checks:** Both layouts that pypulseq reads (`aflGCAcousticResonanceFrequency`, and
+`asGPAParameters[0].sGCParameters.aflAcousticResonanceFrequency`, each with its
+bandwidths) give the same `[frequency, bandwidth]` float pairs, without the pair that has
+frequency 0, and the source of `acoustic.resonances` is the file name. The SAFE section
+stays. The second layout is tested in the plain and in the split file.
+
+**How:** The test writes the file with the fixture, appends synthetic resonance lines (in
+the split file, before the end of the `ASCCONV` block), and compares the result with the
+expected pairs.
+
+**Assumptions:** The frequency 0 is an unused entry, as in pypulseq's
+`asc_to_acoustic_resonances`.
+
+#### `test_read_asc_profile_gives_only_the_sections_that_the_file_has`
+
+**Checks:** A file with no resonances has no `acoustic` section and no
+`acoustic.resonances` source. A file with no SAFE parameters gives no sections and no
+sources.
+
+**How:** The test reads a fixture file without resonances, and a small `.asc` file with
+only `asCOMP.tName`.
+
+**Assumptions:** None.
+
+#### `test_read_asc_profile_is_a_registered_profile_reader`
+
+**Checks:** The entry-point group `pulseq_checks.profile_readers` has `siemens-asc`, and
+it loads `read_asc_profile`.
+
+**How:** The test reads the group with `importlib.metadata.entry_points` and loads the
+entry point.
+
+**Assumptions:** The installed metadata is current: after a change in `pyproject.toml`,
+`uv sync --reinstall-package pulseq-checks` updates it.
+
+#### `test_read_asc_profile_gives_the_gpa_limits_of_the_mode`
+
+**Checks:** For each of the six modes (`absolute`, `normal`, `fast`, `ultrafast`,
+`whisper`, `boost`), in the plain and in the split layout, `opts` has `max_grad` equal to
+`flGradMaxAmpl<Mode>` and `max_slew` equal to `1000 / flGradMinRiseTime<Mode>` (exact float
+equality; both are floats, also when the file has integers), with `grad_unit` `"mT/m"` and
+`slew_unit` `"T/m/s"`. The four `opts.*` sources are `<file name> (<mode>)`, and the SAFE
+section and its source are as without a mode.
+
+**How:** The test writes a file with the six synthetic pairs of the fixture's `gpa`
+keyword, reads it with each mode, and compares the result with the pair of that mode and
+the same expression `1000 / rise_time`.
+
+**Assumptions:** The Siemens units (amplitude in mT/m, rise time in µs per mT/m) of plan
+section 2.3, fact 9. The values are synthetic and differ from mode to mode, so a reader
+that takes the wrong mode fails.
+
+#### `test_read_asc_profile_ignores_the_default_twins_of_the_gpa_fields`
+
+**Checks:** A file whose `flDefGradMaxAmpl<Mode>` and `flDefGradMinRiseTime<Mode>` have
+other values than the `flGrad...` fields gives the values of the `flGrad...` fields.
+
+**How:** The test writes the `Fast` limits with the fixture, appends the two `flDefGrad...`
+lines with other values (plain and split layout), and reads the mode `fast`.
+
+**Assumptions:** The `flDefGrad...` fields are twins that hold the default, and the
+reader uses `flGrad...` (plan section 2.3, fact 9).
+
+#### `test_read_asc_profile_without_a_gradient_mode_gives_no_opts`
+
+**Checks:** Without `gradient_mode`, there is no `opts` section and no `opts.*` source,
+also when the file has the GPA fields of all modes.
+
+**How:** The test writes a file with the six modes and reads it without a mode.
+
+**Assumptions:** There is no default mode, because there are no default limits (R2).
+
+#### `test_read_asc_profile_with_an_unknown_gradient_mode_is_a_value_error`
+
+**Checks:** The modes `nominal` (it has no rise time), `Fast` and `UltraFast` (a wrong
+case), `turbo` and the empty string are a `ValueError` that names all six known modes,
+also when the file has limits of a `Nominal` mode.
+
+**How:** The test writes a file with the six modes and a `Nominal` pair, and reads it with
+each mode.
+
+**Assumptions:** The mode names of the profile are lower case (plan section 4.4).
+
+#### `test_read_asc_profile_with_a_mode_that_the_file_does_not_have_is_a_value_error`
+
+**Checks:** A mode whose amplitude field is missing, whose rise time field is missing, or
+that has neither, is a `ValueError` that names the file, the mode and the first missing
+field.
+
+**How:** The test writes a file with the `Fast` limits, appends none, one or the other of
+the `Boost` lines, and reads the mode `boost`.
+
+**Assumptions:** The limits of another mode in the file are not a substitute.
+
+#### `test_read_asc_profile_with_an_invalid_gpa_value_is_a_value_error`
+
+**Checks:** An amplitude or a rise time that is 0, negative, infinite, or a string is a
+`ValueError` that names the file, the mode and the field.
+
+**How:** The test writes a file, appends the two `Fast` lines with one of the values of a
+list (`0.0`, `0`, `-5.0`, `1e999`, `"text"`), and reads the mode `fast`.
+
+**Assumptions:** `readasc` reads `1e999` as `inf`. A rise time of 0 would be a division
+by zero.
+
+#### `test_read_asc_profile_with_safe_parameters_but_no_scale_factor_is_a_value_error`
+
+**Checks:** A file with the `flGSWD*` fields but without one of the gradient scale factors
+(`flGScaleFactorX`, `Y`, `Z`), or without all three, is a `ValueError` that names the file
+and the first missing field, in the plain and in the split layout.
+
+**How:** The test writes the fixture file, removes the scale factor lines, and reads it.
+
+**Assumptions:** pypulseq's `asc_to_hw` would assume 1/pi and print a warning; the reader
+does not supply that default (R2).
+
+#### `test_read_asc_profile_with_some_safe_fields_but_not_all_is_a_value_error`
+
+**Checks:** A file that has some `flGSWD*` fields but lacks one (an entry of an array, a
+stimulation limit) is a `ValueError` "incomplete SAFE parameters" that names the file, in
+the plain layout and in the split layout (where the field is in the `$INCLUDE` file).
+
+**How:** The test writes the fixture file, removes one `flGSWD*` line, and reads it.
+
+**Assumptions:** None.
+
+#### `test_read_asc_profile_with_mismatched_acoustic_resonances_is_a_value_error`
+
+**Checks:** In both layouts, frequencies without a bandwidth list, bandwidths without a
+frequency list, a bandwidth list with one entry less, and a bandwidth list with the same
+count but another index are a `ValueError` that names the file.
+
+**How:** The test appends the lines of each layout with one of the four changes and reads
+the file.
+
+**Assumptions:** `readasc` gives a list as a dict of index to value, and a frequency and a
+bandwidth are a pair when they have the same index, so the reader compares the index
+sets, not only the counts. A missing bandwidth list would be a `KeyError` in pypulseq, and
+a shorter one would drop the last resonances without a message.
+
+#### `test_read_profile_gives_the_gpa_limits_of_the_asc_file`
+
+**Checks:** A profile that names an `.asc` file and the mode `fast` gets the GPA limits of
+that mode (50 mT/m, and 1000 / 10 = 100 T/m/s) in its `hardware_limits`, and the source of
+the four `opts` values is the file name followed by ` (fast)`.
+
+**How:** The test writes an `.asc` file with the `gpa` keyword of `write_gradient_asc` and a
+profile file next to it, and reads the profile with `read_profile`. It compares the limits
+with a relative tolerance of 1e-12 and the four sources exactly.
+
+**Assumptions:** The entry point `siemens-asc` is installed (`uv sync` after the change of
+`pyproject.toml`). The limits go through `pp.Opts`, which stores them in Hz/m and Hz/m/s
+and back, so they are equal only to rounding.
+
+#### `test_read_profile_with_max_grad_and_a_gradient_mode_is_an_error`
+
+**Checks:** A profile that gives `max_grad` in `[opts]` and also selects a mode of its
+`.asc` file is a `ProfileError` that names `opts.max_grad`, the source `profile` and the
+source of the `.asc` file with the mode.
+
+**How:** The test writes the `.asc` file and a profile with `asc`, `asc_gradient_mode` and
+`max_grad = 80`, and matches the message of the error.
+
+**Assumptions:** None.
+
+#### `test_read_profile_with_a_gradient_mode_and_no_asc_is_an_error`
+
+**Checks:** A profile with `asc_gradient_mode` and no `asc` is a `ProfileError`.
+
+**How:** The test writes such a profile and matches `asc_gradient_mode` in the message.
+
+**Assumptions:** None.
+
+#### `test_read_profile_with_an_unknown_gradient_mode_is_an_error`
+
+**Checks:** The `ValueError` of the reader for the unknown mode `nominal` reaches the caller
+of `read_profile` as a `ProfileError` that names the `.asc` file.
+
+**How:** The test writes the `.asc` file and a profile with `asc_gradient_mode =
+"nominal"`, and matches the file name in the message.
+
+**Assumptions:** None.
