@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "name": "Prisma AS82",
+  "vendor": "siemens",
+  "opts": {
+    "max_grad": 80,
+    "grad_unit": "mT/m",
+    "max_slew": 200,
+    "slew_unit": "T/m/s",
+    "rf_dead_time": 0.0001,
+    "rf_ringdown_time": 3e-05,
+    "adc_dead_time": 1e-05,
+    "B0": 2.89
+  },
+  "rasters": {
+    "GradientRasterTime": 1e-05,
+    "RadiofrequencyRasterTime": 1e-06,
+    "AdcRasterTime": 1e-07,
+    "BlockDurationRaster": 1e-05,
+    "rule": "equal"
+  },
+  "models": {
+    "pns": {
+      "safe": {
+        "name": "test model",
+        "x": {
+          "a1": 0.5
+        },
+        "y": {
+          "a1": 0.6
+        },
+        "z": {
+          "a1": 0.7
+        }
+      }
+    }
+  },
+  "acoustic": {
+    "resonances": [
+      [
+        590,
+        100
+      ],
+      [
+        1140,
+        220
+      ]
+    ]
+  }
+}

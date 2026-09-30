@@ -686,6 +686,86 @@ pulseq-check SEQ_FILE (--config FILE | --target PROFILE ...)
   run.
 - There is no flag for the `seq.system` limits (decision 4).
 
+### 4.9 The interfaces between phases 2, 3 and 4 (task 3.4)
+
+Sections 4.3 to 4.6 do not give these interfaces. The user approved them on
+2026-09-30. Before the workers of phase 3 start, the executing agent writes
+stubs of `profile.py`, `results.py`, `rules.py` and `registry.py` with these
+types. `registry.py` gives `profile_reader(name)`, `models()` and
+`check_rules()`, and `RegistryError` for two packages that give one name or
+one check ID. A check entry point loads a `CheckRule` object.
+
+**Errors of the run.** `results.py` has `CheckRunError(Exception)`. Each
+error of the run is a subclass of it: `ProfileError` (`profile.py`),
+`ConfigError` (`config.py`) and `RunError` (`run.py`). `run_checks` raises
+`RunError` for an error of the run (section 4.6), and for an exception of
+`Sequence.read`. The command catches `CheckRunError` and gives status 1.
+
+**The profile reader** (group `pulseq_checks.profile_readers`, name
+`siemens-asc`, phase 4):
+
+```python
+def read_asc_profile(
+    path: Path, *, gradient_mode: str | None = None
+) -> tuple[dict, dict[str, str]]: ...
+```
+
+- The first value (the sections) has the nested form of the profile file,
+  with only the values that the `.asc` file gives:
+  `{"opts": {"max_grad": ..., "grad_unit": "mT/m", "max_slew": ...,
+  "slew_unit": "T/m/s"}, "models": {"pns": {"safe": {...}}},
+  "acoustic": {"resonances": [[f, bw], ...]}}`. `opts` is there only with a
+  `gradient_mode`.
+- The second value (the sources) maps each value path to a label. The value
+  paths are `opts.<key>`, `models.<model name>` (for example
+  `models.pns.safe`) and `acoustic.resonances`. The label is the file name
+  of `path`. For the GPA values, the label is followed by the mode, for
+  example `"MP_GPA_TEST.asc (fast)"`.
+- The reader checks the mode: an unknown mode, or a mode that the file does
+  not have, is a `ValueError`. A missing file, or a missing `$INCLUDE` file,
+  is an `OSError`. It does not import a type of phase 3.
+- `read_profile` gives the `asc` path relative to the profile file, and
+  `asc_gradient_mode` with no change. It turns a `ValueError` or `OSError` of
+  the reader into a `ProfileError` that names the profile and the `.asc`
+  file. A value path that is in the profile file and in the sources of the
+  reader is a `ProfileError` that names the path and both sources. Thus a
+  profile that selects a mode does not give `max_grad`, `max_slew`,
+  `grad_unit` or `slew_unit`.
+
+**Models** (group `pulseq_checks.models`). An entry point is an object with:
+
+- `name: str`: the dotted path of its section under `models`, for example
+  `"pns.safe"` for `[models.pns.safe]`.
+- `version: int`: the model version of a result (section 4.5).
+- `read(params: Mapping) -> dict`: returns the checked parameters as a plain
+  dict of JSON types. It raises `ValueError` for an unknown or a missing key.
+  `read_profile` turns it into a `ProfileError` that names the section.
+
+`read_profile` calls `read` for each installed model that the profile file
+or the `.asc` file gives, and keeps the result in
+`TargetProfile.models[name]`. A section under `models` that no installed
+model reads goes to `unused_sections` (for example `"models.pns.other"`).
+
+**The SAFE model** (phase 2): `pns_levels.SAFE_MODEL`, name `"pns.safe"`,
+version 1. The parameters: an optional `name` (str), and `x`, `y` and `z`,
+each with exactly the nine fields of the hardware struct: `tau1`, `tau2`,
+`tau3`, `a1`, `a2`, `a3`, `stim_limit`, `stim_thresh` and `g_scale`.
+`pns_levels.hw_from_dict(params)` gives the `SimpleNamespace` of
+`asc_to_hw` for the `hardware` keyword. Phase 5 registers `SAFE_MODEL` in
+`pyproject.toml`. The tests of phase 3 use test models.
+
+**The link to a specification.** A result of a check of this package links
+to `https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#<anchor>`.
+The heading of each check in `docs/checks.md` (phase 6) is its ID in
+backticks, so the anchor is the ID with the dots removed (`timing.rasters`
+gives `#timingrasters`). `rules.spec_url(spec)` gives `spec.url` when it is
+not `None`, and this link otherwise.
+
+**The order of phase 4.** Phase 3 tests rule 4 of section 4.3 with a test
+reader. Phase 4 tests `read_asc_profile` directly. The PR of phase 4 opens
+after phase 3 is merged: it is rebased on phase 3 and adds tests through
+`read_profile` (the two errors of task 4.2 that rule 4 gives).
+
 ## 5. Phases
 
 Each phase: its branch (section 3.4), its tasks, and the checks before its

@@ -31,7 +31,8 @@ Contents:
 1. [Static checks](#1-static-checks)
 2. [Tests](#2-tests): the package; the shared sequence helpers, the sequence
    index, the raster sampler and the sequence extensions; the analyses (PNS and
-   the PNS levels, and the gradient limits)
+   the PNS levels, and the gradient limits); the target profile, the results,
+   the run function and the check configuration
 
 ---
 
@@ -1931,5 +1932,1405 @@ hardwares of one sequence. Each runs the model one time.
 
 **How:** The test patches `pns.pns_levels` as above, and calls the three two times in
 the same order. It checks that there were 3 calls.
+
+### 2.8 Target profile (`test_profile.py`)
+
+`test_profile.py` tests `profile.py` (plan section 4.3, rules 1 to 6, and section 4.9):
+`read_profile`, which reads a target profile from a TOML or a JSON file, and the fields
+and methods of `TargetProfile`. The example profiles are in `tests/profiles/`:
+`prisma.toml` and `prisma.json` (the example of plan section 4.3 without `asc`),
+`minimal.toml`, `hz_units.toml`, `unused.toml` and `with_asc.toml`. The other profiles
+are written in `tmp_path`. The tests do not use an installed model or an installed
+reader: an autouse fixture replaces `registry.models` (one test model, "pns.safe", that
+has the keys of the SAFE model and checks only the names) and `registry.profile_reader`
+(no reader), and a test that needs the reader "siemens-asc" installs a test reader,
+which returns sections and sources that the test gives. No test reads real `.asc` data.
+A test of an error case matches the message against the file name, because each
+`ProfileError` must name the profile file.
+
+#### `test_toml_and_json_give_equal_profiles_except_for_the_path`
+
+**Checks:** `tests/profiles/prisma.toml` and `tests/profiles/prisma.json`, the example
+of plan section 4.3 without `asc`, read to equal `TargetProfile` objects except for
+`source_path`.
+
+**How:** The test reads both files and compares the two profiles with `==`, after it
+sets `source_path` of both to None. It first checks that the two `source_path` values
+differ.
+
+**Assumptions:** The JSON file is the output of `json.dump` for the parsed TOML file.
+The test does not check that the two files have the same text in another form.
+
+#### `test_the_example_of_plan_section_4_3_reads_to_the_expected_values`
+
+**Checks:** The example of plan section 4.3 (without `asc`, with a test SAFE-like model)
+reads to the values that the file gives, in every field of `TargetProfile`.
+
+**How:** The test reads `prisma.toml` and compares `name`, `vendor`, `format_version`,
+`opts`, `rasters`, `raster_rule`, `models` (the return value of the test model),
+`acoustic_resonances` (a tuple of float pairs) and `unused_sections` with values written
+in the test. It checks that `hardware_limits` exists and has the profile name as its
+label.
+
+**Assumptions:** The test model returns its parameters with one added key, so the test
+sees that `read` ran. The numbers of the limits are in the tests of the hardware limits.
+
+#### `test_an_example_file_converted_to_json_reads_to_an_equal_profile`
+
+**Checks:** Each example file in `tests/profiles/` (`prisma`, `minimal`, `hz_units`,
+`unused`) gives an equal profile from its TOML text and from the same data as JSON.
+
+**How:** The test is parametrized over the four names. It parses the TOML file with
+`tomllib`, writes the data with `json.dumps` to a JSON file in `tmp_path`, reads both
+with `read_profile`, and compares the profiles with `==` after it sets `source_path` of
+both to None.
+
+**Assumptions:** This is the round trip between the two formats. The test does not write
+a profile back to a file, because `read_profile` is the only function that the plan
+gives for files.
+
+#### `test_the_path_can_be_a_string_and_source_path_is_resolved`
+
+**Checks:** `read_profile` takes a `str` path, and `source_path` is the absolute,
+resolved path of the file.
+
+**How:** The test changes the working directory to `tests/profiles`, reads "prisma.toml"
+as a relative `str`, and compares `source_path` with the resolved path of the file.
+
+**Assumptions:** None.
+
+#### `test_another_suffix_is_a_profile_error_that_names_the_file`
+
+**Checks:** Rule 1: a file with a suffix other than `.toml` or `.json` (`.yaml`, `.txt`,
+no suffix) is a `ProfileError` whose message has the file name.
+
+**How:** The test is parametrized over three file names. It writes a valid TOML text to
+each and calls `read_profile`.
+
+**Assumptions:** The content of the file is valid, so the suffix is the only reason for
+the error.
+
+#### `test_a_profile_error_is_an_error_of_the_run`
+
+**Checks:** `ProfileError` is a subclass of `CheckRunError`, so that the command gives
+exit status 1 for it.
+
+**How:** The test calls `issubclass`.
+
+**Assumptions:** The test does not run the command. The command tests check the exit
+status.
+
+#### `test_a_missing_file_is_a_profile_error_that_names_the_file`
+
+**Checks:** Rule 1: a file that does not exist is a `ProfileError` whose message has the
+file name.
+
+**How:** The test calls `read_profile` for a `.toml` path in `tmp_path` that does not
+exist.
+
+**Assumptions:** None.
+
+#### `test_a_file_that_does_not_parse_is_a_profile_error_that_names_the_file`
+
+**Checks:** Rule 1: a file with a TOML or JSON syntax error, a JSON file whose top level
+is a list, and a file that is not UTF-8 are each a `ProfileError` whose message has the
+file name.
+
+**How:** The test is parametrized over four files: a TOML file with a key that has no
+value, a JSON file that stops in the middle, a JSON list and a `.toml` file with bytes
+that are not UTF-8. It calls `read_profile` for each.
+
+**Assumptions:** None.
+
+#### `test_the_format_is_necessary`
+
+**Checks:** Rule 2: a profile without the key `format` is a `ProfileError` whose message
+has the file name and the key.
+
+**How:** The test writes a JSON profile with only a name and calls `read_profile`.
+
+**Assumptions:** None.
+
+#### `test_the_format_must_be_an_integer`
+
+**Checks:** Rule 2: a `format` that is a string, a float, a bool, null or a list is a
+`ProfileError`.
+
+**How:** The test is parametrized over five values. It writes a JSON profile with the
+value and calls `read_profile`.
+
+**Assumptions:** A bool is an `int` in Python, so the test has `True` to show that the
+reader refuses it.
+
+#### `test_a_format_below_1_is_an_error`
+
+**Checks:** Rule 2: a `format` of 0 or -1 is a `ProfileError`.
+
+**How:** The test is parametrized over the two values and calls `read_profile` for a
+JSON profile with each.
+
+**Assumptions:** None.
+
+#### `test_a_newer_format_is_an_error_that_names_both_versions`
+
+**Checks:** Rule 2: a `format` above `FORMAT_VERSION` is a `ProfileError` whose message
+has the version of the file and the version of the reader.
+
+**How:** The test writes a profile with `FORMAT_VERSION + 1` and matches the message
+against "format N ... format M" with both numbers.
+
+**Assumptions:** The test reads `FORMAT_VERSION` from the module, so it does not change
+when the version changes.
+
+#### `test_the_name_is_necessary_and_a_non_empty_string`
+
+**Checks:** A profile without `name`, or with an empty string, a number or a list as the
+name, is a `ProfileError` that names the key.
+
+**How:** The test is parametrized over four values (the first is a missing key) and
+calls `read_profile` for a JSON profile.
+
+**Assumptions:** None.
+
+#### `test_the_optional_top_level_keys_must_be_strings`
+
+**Checks:** `vendor` (a number), `asc` (a number, an empty string) and
+`asc_gradient_mode` (a number) that are not strings are each a `ProfileError` that names
+the key.
+
+**How:** The test is parametrized over four pairs. It writes a JSON profile with the
+pair (and an `asc` key, so that `asc_gradient_mode` is not refused for a missing `asc`
+first) and calls `read_profile`.
+
+**Assumptions:** None.
+
+#### `test_an_unknown_top_level_key_with_a_value_that_is_not_a_table_is_an_error`
+
+**Checks:** Rule 3: an unknown key at the top level with a scalar or a list value is a
+`ProfileError` that names the key and the top level.
+
+**How:** The test is parametrized over five values (a number, a string, two lists, a
+bool). It writes a JSON profile with the key `colour` and calls `read_profile`.
+
+**Assumptions:** The plan says that an unknown key in a known section is an error. The
+top level is a known section with a rule of its own: an unknown key with a table value
+is a section.
+
+#### `test_an_unknown_top_level_table_is_kept_as_an_unused_section`
+
+**Checks:** Rule 3: an unknown top-level key with a table value is in `unused_sections`
+by its name, in the order of the file, and the profile is valid.
+
+**How:** The test writes a JSON profile with two unknown tables (one with a nested
+table) and compares `unused_sections` with the two names.
+
+**Assumptions:** None.
+
+#### `test_an_unused_section_does_not_add_a_value_or_a_source`
+
+**Checks:** An unknown top-level table that has a key named like a known section
+(`opts`) gives no value and no source.
+
+**How:** The test writes a profile with `notes = {opts = {max_grad = 1}}` and checks
+that `sources` is empty and that `has_value("opts.max_grad")` is False.
+
+**Assumptions:** None.
+
+#### `test_a_known_section_that_is_not_a_table_is_an_error`
+
+**Checks:** `opts`, `rasters`, `models` or `acoustic` with a list as its value is a
+`ProfileError` that names the section.
+
+**How:** The test is parametrized over the four sections and calls `read_profile` for a
+JSON profile.
+
+**Assumptions:** None.
+
+#### `test_an_unknown_key_in_a_known_section_is_an_error_that_names_the_key_and_the_section`
+
+**Checks:** Rule 3: an unknown key in `opts` (`max_slwe`, and `self`, which is an
+argument of `pp.Opts.__init__` but not a keyword that a profile can give), `rasters` or
+`acoustic` is a `ProfileError` that names the key and the section.
+
+**How:** The test is parametrized over four cases and matches the message against "key
+... [section]".
+
+**Assumptions:** The unknown key of `models` is a section that is not installed, and it
+is not an error: the tests of the unused sections have it. The keys of a model section
+are the work of the model.
+
+#### `test_the_keys_of_opts_are_the_keywords_of_pp_opts`
+
+**Checks:** Each keyword of `pp.Opts.__init__` that is not a raster is a known key of
+`[opts]`, and it is in `opts` and in `sources` after the read.
+
+**How:** The test writes a profile with 11 keywords (the dead times, `gamma`, the limits
+and their units, the ADC sample limits, `B0`) and compares `opts` with the same dict. It
+checks `has_value` for each key.
+
+**Assumptions:** The test does not have each keyword of `pp.Opts` that the installed
+pypulseq has: the reader builds the set from `inspect.signature`, so a keyword of a
+newer pypulseq is known without a change here.
+
+#### `test_a_raster_keyword_in_opts_is_an_error_that_points_to_the_rasters`
+
+**Checks:** Each of the four raster keywords of `pp.Opts` (`grad_raster_time`,
+`rf_raster_time`, `adc_raster_time`, `block_duration_raster`) in `[opts]` is a
+`ProfileError` that says that the rasters go in `[rasters]` with their reserved names.
+
+**How:** The test is parametrized over the four keywords and matches the message against
+"keyword ... [rasters] ... reserved".
+
+**Assumptions:** None.
+
+#### `test_each_raster_name_is_read_and_given_to_its_opts_keyword`
+
+**Checks:** The four reserved raster names are read into `rasters`, and `make_opts()`
+gives each to the matching `pp.Opts` attribute.
+
+**How:** The test writes a profile with the four names and different values. It compares
+`rasters` with the dict and the four attributes of `make_opts()` with the values.
+
+**Assumptions:** None.
+
+#### `test_the_raster_rule_is_read`
+
+**Checks:** `rasters.rule` "equal" and "multiple" are read into `raster_rule`, and the
+rule is in `sources`, and it is not in `rasters`.
+
+**How:** The test is parametrized over the two rules. It writes a profile with only the
+rule.
+
+**Assumptions:** None.
+
+#### `test_another_raster_rule_is_an_error`
+
+**Checks:** A `rasters.rule` that is not "equal" or "multiple" (a different string, an
+empty string, a number, null) is a `ProfileError`.
+
+**How:** The test is parametrized over four values and calls `read_profile`.
+
+**Assumptions:** None.
+
+#### `test_a_raster_must_be_a_positive_number`
+
+**Checks:** A raster of 0, a negative number, a string, a bool, null, a list or NaN is a
+`ProfileError` that names the raster.
+
+**How:** The test is parametrized over seven values. It writes a JSON profile (Python's
+`json` writes NaN as a token that it reads again) and calls `read_profile`.
+
+**Assumptions:** None.
+
+#### `test_a_raster_of_the_toml_file_can_be_an_integer`
+
+**Checks:** A raster that is an integer in a TOML file is a valid positive number.
+
+**How:** The test writes `GradientRasterTime = 1` in a TOML file and compares `rasters`.
+
+**Assumptions:** The value 1 s is not a real raster. The test checks the type only.
+
+#### `test_the_acoustic_resonances_are_a_tuple_of_float_pairs`
+
+**Checks:** `acoustic.resonances` is read into `acoustic_resonances` as a tuple of float
+pairs, and it is in `sources`.
+
+**How:** The test writes integer and float pairs, and compares the tuple and the types
+of the numbers.
+
+**Assumptions:** None.
+
+#### `test_malformed_acoustic_resonances_are_an_error`
+
+**Checks:** `acoustic.resonances` that is not a list of [frequency, bandwidth] pairs of
+numbers (a number, a flat list, a pair with one or three numbers, strings, bools, a
+dict, a string) is a `ProfileError` that names the value.
+
+**How:** The test is parametrized over eight values and calls `read_profile`.
+
+**Assumptions:** None.
+
+#### `test_an_empty_acoustic_resonances_list_is_an_empty_tuple`
+
+**Checks:** An empty list of resonances is valid, and it is the empty tuple (not None).
+
+**How:** The test writes an empty list and compares `acoustic_resonances` with `()`.
+
+**Assumptions:** The reader does not judge if a profile with no resonance is useful.
+
+#### `test_a_null_value_in_opts_is_an_error_because_pp_opts_would_use_its_default`
+
+**Checks:** A null value (JSON) in `[opts]` is a `ProfileError`: `pp.Opts` takes None as
+"use the default", and rule 6 gives no default.
+
+**How:** The test writes `max_grad: null` in a JSON profile and matches the message
+against the file name and "opts.max_grad is null".
+
+**Assumptions:** None.
+
+#### `test_a_bad_value_for_pp_opts_is_a_profile_error_that_names_the_file`
+
+**Checks:** A value that `pp.Opts` refuses (here an unknown unit) is a `ProfileError`
+whose message has the file name and the text of the `pp.Opts` error.
+
+**How:** The test writes `grad_unit = "furlong"` and matches the message.
+
+**Assumptions:** The reader does not check value ranges or types. `pp.Opts` checks only
+the units, so a limit that is a negative number is valid here.
+
+#### `test_a_limit_that_is_not_a_number_is_a_profile_error`
+
+**Checks:** A `max_grad` that is a string or a list, with a valid `max_slew`, is a
+`ProfileError` that names the file, although `pp.Opts` accepts it.
+
+**How:** The test is parametrized over two values. The `TypeError` comes from the
+calculation of the hardware limits, and the reader turns it into the error.
+
+**Assumptions:** The test covers `max_grad` and `max_slew` only (the two values that the
+reader uses). Another key with a value of the wrong type is an error of `pp.Opts` or of
+a check later.
+
+#### `test_the_model_section_is_read_by_its_installed_model_and_stored_by_name`
+
+**Checks:** A `[models.pns.safe]` section is given to `read` of the installed model
+"pns.safe"; the return value is in `models["pns.safe"]`, and `sources` has
+`models.pns.safe`.
+
+**How:** The test installs the test model with `monkeypatch.setattr(registry, "models",
+...)`, writes a profile with nested tables and compares `models`, `sources`, `has_value`
+and `unused_sections`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_profile_without_a_model_section_has_no_models`
+
+**Checks:** A profile with no `models` key has an empty `models` mapping, and no source
+for a model.
+
+**How:** The test reads a profile with the name only while the test model is installed.
+
+**Assumptions:** None.
+
+#### `test_a_model_that_is_not_installed_makes_its_section_unused`
+
+**Checks:** With no installed model, the section `models.pns.safe` is not read: `models`
+is empty, and `unused_sections` is `("models.pns",)`, the highest table without an
+installed model under it.
+
+**How:** The test installs no model and reads a profile with `[models.pns.safe]`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_model_error_is_a_profile_error_that_names_the_section`
+
+**Checks:** A `ValueError` of `Model.read` is a `ProfileError` whose message has the
+file name, the section `models.pns.safe` and the text of the `ValueError`.
+
+**How:** The test gives the test model a section with an unknown key and matches the
+message.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_model_section_that_is_not_a_table_is_a_profile_error`
+
+**Checks:** A `models.pns.safe` that is a number, with an installed model "pns.safe", is
+a `ProfileError` that names `models.pns.safe`.
+
+**How:** The test writes the number and calls `read_profile`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_value_directly_under_models_that_is_not_a_table_is_an_error`
+
+**Checks:** A value that is not a table under `models` (a number, a string, a list) is a
+`ProfileError` that names the path (`models.pns`).
+
+**How:** The test is parametrized over three values.
+
+**Assumptions:** The reader applies the same rule to a value that is not a table at each
+level under `models` that leads to an installed model.
+
+#### `test_the_tables_of_models_with_no_installed_model_are_unused_sections`
+
+**Checks:** In `tests/profiles/unused.toml`, `[notes]`, `[models.pns.other]` and
+`[models.ge.pns]` are unused sections (`notes`, `models.pns.other` and `models.ge`), in
+the order of the file, and the installed `[models.pns.safe]` is read.
+
+**How:** The test reads the file and compares `unused_sections`, the names in `models`
+and `sources`.
+
+**Assumptions:** The name of the last entry is `models.ge`, not `models.ge.pns`: the
+reader gives the highest table that has no installed model under it.
+
+#### `test_the_highest_table_without_an_installed_model_is_the_unused_section`
+
+**Checks:** A table with tables under it and no installed model anywhere under it is one
+unused section, with the name of the table that is the highest one (`models.ge` for
+`ge.pns.params`, `models.philips`).
+
+**How:** The test writes a JSON profile with both and compares `unused_sections`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_the_hardware_limits_are_in_mt_per_m_and_t_per_m_per_s`
+
+**Checks:** `hardware_limits` has the limits in mT/m and T/m/s for the same limits that
+the profile gives in mT/m and T/m/s, in Hz/m and Hz/m/s (the defaults of `pp.Opts`) and
+in rad/ms/mm and T/m/s; its label is the name of the profile.
+
+**How:** The test is parametrized over three profiles that give 80 mT/m and 200 T/m/s in
+three units, and compares the two numbers with `pytest.approx`.
+
+**Assumptions:** The numbers in Hz use the gamma of `pp.Opts` (42.576 MHz/T).
+
+#### `test_the_hardware_limits_of_a_profile_in_hz_units_come_from_the_example_file`
+
+**Checks:** `tests/profiles/hz_units.toml`, which gives the limits in the units that
+`pp.Opts` has by default, reads to 100 mT/m and 100 T/m/s, with the label of the
+profile.
+
+**How:** The test reads the file and compares the limits.
+
+**Assumptions:** None.
+
+#### `test_the_hardware_limits_use_the_gamma_of_the_opts_object`
+
+**Checks:** With a `gamma` in `[opts]`, the limits in mT/m and T/m/s are the values that
+the profile gives, and `make_opts()` has a different Hz/m value from a profile without
+`gamma`.
+
+**How:** The test reads two profiles with the same limits in mT/m and T/m/s, one of them
+with `gamma = 10e6`, and compares the limits and `make_opts().max_grad`.
+
+**Assumptions:** None.
+
+#### `test_hardware_limits_need_both_max_grad_and_max_slew`
+
+**Checks:** With only `max_grad` or only `max_slew`, `hardware_limits` is None.
+
+**How:** The test is parametrized over the two keys.
+
+**Assumptions:** None.
+
+#### `test_a_profile_with_the_name_only_has_no_default_value`
+
+**Checks:** Rule 6: a profile with `format` and `name` only has None for `opts`,
+`rasters`, `raster_rule`, `hardware_limits`, `vendor` and `acoustic_resonances`, and
+empty `models`, `sources` and `unused_sections`.
+
+**How:** The test compares the whole profile with a `TargetProfile` that it makes.
+
+**Assumptions:** None.
+
+#### `test_an_empty_known_section_gives_no_value`
+
+**Checks:** An empty `[opts]`, `[rasters]`, `[acoustic]` or `[models]` gives no value,
+no source and None (not an empty mapping) for the optional fields.
+
+**How:** The test is parametrized over four profiles.
+
+**Assumptions:** None.
+
+#### `test_the_sources_name_each_value_that_the_profile_gives`
+
+**Checks:** For `prisma.toml`, `sources` has each value path (`opts.<key>` for each key,
+`rasters.<name>` for the four names, `rasters.rule`, `models.pns.safe`,
+`acoustic.resonances`) with the label "profile", and no other.
+
+**How:** The test builds the list of value paths from `opts` and `RASTER_OPTS` and
+compares it with `sources`.
+
+**Assumptions:** None.
+
+#### `test_has_value_is_true_for_a_path_in_the_sources_only`
+
+**Checks:** `has_value(path)` is True for a path in `sources`, and False for a path that
+is not.
+
+**How:** The test reads a profile with `opts.B0` and calls `has_value` for three paths.
+
+**Assumptions:** None.
+
+#### `test_make_opts_builds_pp_opts_from_the_opts_and_the_rasters`
+
+**Checks:** `make_opts()` gives a `pp.Opts` with the limits (in Hz/m and Hz/m/s), the
+dead time, `B0` and three of the rasters that `prisma.toml` gives.
+
+**How:** The test reads the file and compares the attributes of the object.
+
+**Assumptions:** None.
+
+#### `test_the_asc_reader_is_called_with_the_path_relative_to_the_profile_and_the_mode`
+
+**Checks:** Rule 4: the reader "siemens-asc" gets the `asc` path relative to the
+directory of the profile file, resolved, and the `asc_gradient_mode` of the profile as a
+keyword.
+
+**How:** The test installs a test reader and reads `tests/profiles/with_asc.toml` (`asc
+= "gpa/test.asc"`, mode "fast"). It compares the arguments of the call.
+
+**Assumptions:** The file `gpa/test.asc` does not exist: the test reader does not open
+it. The test model and the test reader are classes in the test file, not the real ones.
+
+#### `test_the_asc_reader_gets_no_mode_when_the_profile_selects_none`
+
+**Checks:** Without `asc_gradient_mode`, the reader gets `gradient_mode=None`.
+
+**How:** The test reads a profile with `asc` only and compares the mode of the call.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_the_sections_of_the_asc_reader_are_merged_with_the_values_of_the_profile`
+
+**Checks:** The sections of the reader (`opts`, `models`, `acoustic`) and the values of
+the profile (other `opts` keys, a raster and the rule) give one profile.
+
+**How:** The test installs a test reader with sections and sources, reads a profile that
+gives `B0`, a raster and the rule, and compares `opts`, `rasters`, `raster_rule`,
+`acoustic_resonances` and `models`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_the_sources_label_each_value_with_the_profile_or_the_label_of_the_reader`
+
+**Checks:** `sources` has "profile" for the values of the profile file and the label of
+the reader (here "gpa.asc (fast)" and "gpa.asc") for the values that it gives, and
+`has_value` is True for both.
+
+**How:** The test compares `sources` with the dict of both.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_the_hardware_limits_can_come_from_the_values_of_the_asc_reader`
+
+**Checks:** `hardware_limits` exists when the reader gives `max_grad` and `max_slew`
+(and their units), and its label is the profile name.
+
+**How:** The test reads a profile with `asc` and a mode whose test reader gives 60 mT/m
+and 150 T/m/s, and compares the limits.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_reader_without_opts_leaves_the_opts_to_the_profile`
+
+**Checks:** When the reader gives no `opts` and the profile has no `[opts]`, `opts` and
+`hardware_limits` are None, and the model of the reader is read.
+
+**How:** The test installs a test reader with a model section only.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_value_from_the_profile_and_the_asc_reader_is_an_error_that_names_both_sources`
+
+**Checks:** Rule 4: a value path that the profile file and the reader both give
+(`opts.max_grad`, `opts.grad_unit`, `models.pns.safe`, `acoustic.resonances`) is a
+`ProfileError` whose message has the file name, the path, "profile" and the label of the
+reader.
+
+**How:** The test is parametrized over four value paths. It installs a test reader that
+gives all four, writes a profile that gives one of them and matches the message.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_profile_that_gives_max_grad_and_selects_a_mode_is_an_error`
+
+**Checks:** The case of plan section 4.9: a profile that gives `max_grad` and selects a
+mode, for which the reader gives `max_grad`, is a `ProfileError` that names
+`opts.max_grad` and both labels, "profile" and "gpa.asc (fast)".
+
+**How:** The test matches the message against the path and the two labels in this order.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_raster_from_the_profile_and_one_from_the_reader_is_an_error`
+
+**Checks:** A raster that both the profile and the reader give is a `ProfileError` that
+names `rasters.GradientRasterTime`.
+
+**How:** The test installs a test reader that gives the raster.
+
+**Assumptions:** The reader of phase 4 does not give rasters. The test checks that the
+duplicate rule is for each section.
+
+#### `test_the_asc_model_sections_go_through_the_model_read`
+
+**Checks:** A model section from the reader goes through `Model.read`: a `ValueError` is
+a `ProfileError` that names the file and `models.pns.safe`.
+
+**How:** The test installs a test reader with a model section with an unknown key.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_an_asc_model_that_is_not_installed_is_an_unused_section`
+
+**Checks:** A model section from the reader for a model that is not installed is in
+`unused_sections` (`models.pns`), and not in `models`.
+
+**How:** The test installs no model and a test reader that gives `models.pns.safe`.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_gradient_mode_without_asc_is_an_error`
+
+**Checks:** An `asc_gradient_mode` without `asc` is a `ProfileError` that names the file
+and the key, and the reader is not called.
+
+**How:** The test installs a test reader that keeps its calls, reads a profile with a
+mode only and checks that the list of calls is empty.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_asc_without_an_installed_reader_is_an_error`
+
+**Checks:** With `asc` and no reader "siemens-asc" (`registry.profile_reader` gives
+None), `read_profile` raises a `ProfileError` that names the file and the reader.
+
+**How:** The test uses the default of the file, a `profile_reader` that gives None.
+
+**Assumptions:** None.
+
+#### `test_a_reader_error_is_a_profile_error_that_names_the_profile_and_the_asc_file`
+
+**Checks:** A `ValueError`, a `FileNotFoundError` or another `OSError` of the reader is
+a `ProfileError` whose message has the profile file, the `.asc` file and the text of the
+error.
+
+**How:** The test is parametrized over three errors, with a test reader that raises
+them.
+
+**Assumptions:** The test model and the test reader are classes in the test file, not
+the real ones.
+
+#### `test_a_value_of_the_asc_reader_that_is_not_valid_is_a_profile_error`
+
+**Checks:** A reader result with an unknown `opts` key, a value that has no source, an
+unknown top-level section or a malformed list of resonances is a `ProfileError` that
+names the profile file and the `.asc` file.
+
+**How:** The test is parametrized over four results of a test reader.
+
+**Assumptions:** The reader of phase 4 makes a valid result. The test checks that
+`read_profile` does not trust a plugin reader.
+
+### 2.9 Results (`test_results.py`)
+
+These tests cover `ResultMatrix`: its exit status (design section 5.6, R3) and its JSON form
+(decision 9 of the plan). They build the results directly, with no sequence.
+
+#### `test_exit_status`
+
+**Checks:** `ResultMatrix.exit_status()` gives the status of each row of the table of design
+section 5.6: no result or all pass gives 0; a fail gives 2 (required or not); an error gives
+1; a required "not evaluated" gives 1; a "not evaluated" that is not required gives 0. When
+statuses 1 and 2 both apply, the status is 1 (R3): a fail with an error, and a fail with a
+required "not evaluated".
+
+**How:** The test is parametrized. Each case is a list of `Result` objects with a state and a
+`required` flag, in a matrix with one target. The test compares `exit_status()` with the
+status of the case.
+
+**Assumptions:** An empty result list gives 0. A run with no target is an error of the run, not
+a state of the matrix.
+
+#### `test_json_round_trip`
+
+**Checks:** `ResultMatrix.from_json(m.to_json()) == m`, and the new matrix gives the same text
+again, for five matrices: one with every field set, one with `None` fields, one with two
+targets, one with `inf` and `-inf` in a value, a limit and a time, and one with a location
+whose block is `None`. The text is strict JSON (it has no `Infinity` or `NaN`).
+
+**How:** The test is parametrized over a function for each matrix. It writes the text, reads it
+back, and compares the matrices and the two texts. It parses the text again with a
+`parse_constant` function that fails the test on a non-finite constant.
+
+**Assumptions:** `nan` is not in the cases, because `nan != nan`: a matrix with `nan` is never
+equal to itself.
+
+#### `test_json_round_trip_keeps_floats_exactly`
+
+**Checks:** A float of a result comes back with the same value, not a rounded one.
+
+**How:** The test uses `0.1 + 0.2` as a value and `1 / 3` as a limit, and compares the values
+after the round trip with `==`.
+
+**Assumptions:** The JSON module of Python writes the shortest text that gives the same float
+back.
+
+#### `test_json_has_the_keys_of_decision_9`
+
+**Checks:** The JSON object has `"format": 1` and the keys of decision 9, in a fixed order:
+`format`, `package_version`, `sequence`, `targets`, `results`. A target has `name`, `sources`
+(an object), `unused_sections` (a list) and `limits_source`. A result has each `Result` field,
+with `state` as its value text (for example "not evaluated") and `location` as
+`{"block": ..., "time_s": ...}` or `null`.
+
+**How:** The test parses the text of a matrix with every field set, and compares the lists of
+keys and some values. It checks the state text and the `null` location on a second matrix.
+
+**Assumptions:** None.
+
+#### `test_json_writes_a_float_that_is_not_finite_as_a_string`
+
+**Checks:** `inf` and `-inf` are written as the strings "inf" and "-inf", in a value, a limit
+and the time of a location. Strict JSON has no such number.
+
+**How:** The test parses the text of a matrix with these values and checks the strings.
+
+**Assumptions:** `to_json` writes `nan` as "nan" in the same way, and `from_json` reads it, but
+no test covers it.
+
+#### `test_from_json_rejects_a_newer_format`
+
+**Checks:** `from_json` raises `ValueError` for a format above `FORMAT`, and the message names
+both versions (the format of the text and the format that the package reads).
+
+**How:** The test changes `format` to `FORMAT + 1` in the JSON object of a matrix and matches
+the two numbers in the message.
+
+**Assumptions:** None.
+
+#### `test_from_json_rejects_a_format_that_is_not_an_integer`
+
+**Checks:** `from_json` raises `ValueError` for a `format` that is `null`, a string, a float or
+a bool.
+
+**How:** The test is parametrized over these values. It writes each one in the `format` key
+and expects `ValueError`.
+
+**Assumptions:** A bool is not an integer for this check, although Python counts `True` as an
+`int`.
+
+#### `test_from_json_rejects_a_missing_format`
+
+**Checks:** `from_json` raises `ValueError` for an object that has no `format` key.
+
+**How:** The test deletes `format` from the JSON object of a matrix and expects `ValueError`.
+
+**Assumptions:** None.
+
+#### `test_from_json_rejects_an_unknown_key`
+
+**Checks:** An unknown key is a `ValueError` that names the key, in the matrix, in a target, in
+a result and in a location (the same rule as the unknown keys of a profile).
+
+**How:** The test is parametrized over the four places. It adds a key `extra` there and matches
+the name in the message.
+
+**Assumptions:** None.
+
+#### `test_from_json_rejects_a_missing_key`
+
+**Checks:** A missing key is a `ValueError` that names the key, in the matrix, in a target, in
+a result and in a location.
+
+**How:** The test is parametrized over the four places. It deletes one key there (`sequence`,
+`sources`, `required`, `time_s`) and matches the name in the message.
+
+**Assumptions:** None.
+
+### 2.10 The run function (`test_run.py`)
+
+These tests check `run_checks`, the `RunContext` that it gives to a rule, `spec_url`, and
+the entry-point registry (`registry.py`). No test uses an installed check. Each test
+defines its own check rules: a small class with a `CheckSpec` and a `run` function. A test
+installs them by replacing `registry.check_rules` with monkeypatch. The registry tests
+replace `importlib.metadata.entry_points` and use fake entry points with a name, a `load`
+function and a `dist` with a package name. The targets are `TargetProfile` objects that the
+test builds directly (`make_profile`), so the tests do not read a profile file. The tests
+read the results from `ResultMatrix.results` and `ResultMatrix.targets`, and do not use the
+exit status or the JSON form. The sequences are `spin_echo_sequence()` of
+`tests/synthetic.py`, as an object or as a `.seq` file in `tmp_path`.
+
+#### `test_a_missing_input_gives_not_evaluated_and_run_is_not_called`
+
+**Checks:** When a target does not give one of the inputs of a check, the result is "not
+evaluated", its reason names the missing input and not the present one, and `run` is not
+called.
+
+**How:** The test makes a rule with two inputs, `opts.max_grad` and `opts.max_slew`, and a
+target that gives only the first. It runs the check and checks the state, the reason, the
+check ID, the specification version and the target name of the result, and that the rule
+has no call.
+
+**Assumptions:** The rule counts its calls itself. The test does not check the complete
+text of the reason.
+
+#### `test_a_missing_model_gives_not_evaluated_and_run_is_not_called`
+
+**Checks:** When a target does not have one of the models of a check, the result is "not
+evaluated", its reason names the missing model and not the present one, and `run` is not
+called.
+
+**How:** The test makes a rule with the models `m.one` and `m.two`, and a target with only
+`m.one`. It checks the state, the reason, and that the rule has no call.
+
+**Assumptions:** The model parameters of the test target are empty dicts. The function
+checks only the keys of `TargetProfile.models`.
+
+#### `test_a_rule_with_its_input_and_model_is_called`
+
+**Checks:** When the target gives each input and each model of a check, `run` is called one
+time and its result is in the matrix.
+
+**How:** The test makes a rule with one input and one model, and a target that has both. It
+checks that the state is "pass" and that the rule has one call.
+
+**Assumptions:** None.
+
+#### `test_an_exception_of_run_gives_error_and_the_other_checks_run`
+
+**Checks:** An exception of `run` gives the state "error" with the reason
+`"<exception type>: <message>"`, and the other checks of the run still give their results.
+
+**How:** The test makes a rule that raises `ValueError("a test failure")` and a rule that
+passes, and runs both on one target. It checks the state and the reason of the first, and
+the state of the second.
+
+**Assumptions:** The test does not raise an exception that is not a subclass of
+`Exception`.
+
+#### `test_a_result_for_another_check_or_target_gives_error`
+
+**Checks:** A rule whose result has a different check ID, a different target, or is not a
+`Result` gives the state "error" for its own check ID, with a reason that names the
+difference.
+
+**How:** The test makes three rules: one that returns a result of a different specification,
+one that returns a `Result` for the target `other`, and one that returns `None`. It checks
+that each result has the state "error", the check ID of its rule, and a reason that has the
+other check ID, the other target name, or `NoneType`.
+
+**Assumptions:** The test does not check the complete text of the reasons.
+
+#### `test_a_result_of_a_rule_keeps_its_fields_and_gets_the_spec_link`
+
+**Checks:** `ctx.result` fills the check ID, the specification version, the target name and
+the link to the specification, and keeps the fields that the rule gives. The run function
+leaves a result that is correct as it is, and sets `required` to False for a check that is
+not required.
+
+**How:** The test makes a rule that returns a failing result with a value, a limit, a unit
+and a location. It compares the complete result with an expected `Result`. The link is the
+documentation URL with the ID `t.a.b` without its dots.
+
+**Assumptions:** The test repeats the rule for the link (`DOCS_URL` and the ID without dots)
+and does not check that the heading exists in `docs/checks.md`.
+
+#### `test_spec_url_is_the_url_of_the_spec_or_the_heading_of_its_id`
+
+**Checks:** `spec_url` gives `spec.url` when it is not `None`, and otherwise the
+documentation URL with the ID without its dots. It keeps the hyphens of an ID.
+
+**How:** The test calls `spec_url` for `gradient.slew.axis`, for `a.b-c` and for a
+specification with its own URL, and compares the values.
+
+**Assumptions:** None.
+
+#### `test_the_matrix_has_the_sequence_the_version_and_the_targets`
+
+**Checks:** The matrix has `sequence` as the string of the path (for a `str` and for a
+`Path`) or `"<Sequence object>"`, `package_version` as the installed version of
+`pulseq-checks`, and one `TargetInfo` for each target with its name, its sources, its unused
+sections and the limits source `"profile"`.
+
+**How:** The test runs one check for a target with one source and one unused section, with
+a path, with a `Path` and with an object. It compares the fields of the matrix with the
+expected values.
+
+**Assumptions:** The installed version is correct (`test_package.py` checks it against
+`pyproject.toml`).
+
+#### `test_the_results_are_in_the_order_of_the_targets_and_the_check_ids`
+
+**Checks:** The results are in the order of the targets, and for each target in the order of
+the check IDs, whatever the order in which the registry gives the rules. The targets of the
+matrix are in the order of the call.
+
+**How:** The test installs three rules in the order `t.b`, `t.a`, `t.c` and runs two
+targets, `y` and `x`. It compares the list of target and check ID of each result, and the
+names of the targets.
+
+**Assumptions:** None.
+
+#### `test_measure_runs_one_time_for_each_target`
+
+**Checks:** `ctx.measure` calculates a value one time for each name and target: two rules of
+one target get the same object, and two targets calculate it two times, each one on its own
+sequence.
+
+**How:** The test installs two rules that call `ctx.measure("m", fn)`, and runs a `.seq` file
+for two targets. `fn` counts its calls. The test checks that there are two calls, with two
+different sequence objects, that the two rules of one target got the same value, and that
+the two targets got different values.
+
+**Assumptions:** The rules run in the same process, one after the other.
+
+#### `test_measure_keeps_a_value_for_each_name`
+
+**Checks:** `ctx.measure` keeps one value for each name. A second call with the same name
+gives the first value and does not call the new function. A different name calls its
+function.
+
+**How:** A rule calls `ctx.measure` with `"one"`, with `"two"` and again with `"one"` and a
+function that would give a different value. It checks the three values.
+
+**Assumptions:** None.
+
+#### `test_required_for_all_targets_with_none`
+
+**Checks:** A check that `required` maps to `None` is required for each target, and a check
+that it does not name is not required.
+
+**How:** The test runs two checks on two targets with `required={"t.a": None}` and compares
+the `required` field of each result.
+
+**Assumptions:** None.
+
+#### `test_required_for_named_targets`
+
+**Checks:** A check that `required` maps to a list of target names is required only for
+those targets.
+
+**How:** The test runs one check on the targets `x` and `y` with `required={"t.a": ["y"]}`.
+It checks that the result for `x` is not required and the result for `y` is required.
+
+**Assumptions:** None.
+
+#### `test_required_is_set_for_not_evaluated_and_error_results`
+
+**Checks:** The field `required` is True also for a required check that gave "not
+evaluated" (from the run function) or "error" (from an exception).
+
+**How:** The test makes a rule with a missing input and a rule that raises an exception,
+and makes both required for the one target. It checks the state and `required` of each
+result.
+
+**Assumptions:** None.
+
+#### `test_required_with_an_unknown_check_id_is_an_error`
+
+**Checks:** A check ID in `required` that no installed rule has is a `RunError` that names
+the ID.
+
+**How:** The test calls `run_checks` with `required={"t.unknown": None}` and checks the
+exception and its message.
+
+**Assumptions:** None.
+
+#### `test_required_with_an_unknown_target_is_an_error`
+
+**Checks:** A target name in `required` that is not a target of the run is a `RunError`
+that names the target.
+
+**How:** The test calls `run_checks` with `required={"t.a": ["nowhere"]}` for one target
+named `a` and checks the exception and its message.
+
+**Assumptions:** None.
+
+#### `test_select_runs_only_the_selected_checks`
+
+**Checks:** With `select`, only the named checks run, in the order of their IDs. With no
+`select`, all installed checks run.
+
+**How:** The test installs three rules and runs with `select=["t.c", "t.a"]`. It checks the
+check IDs of the results and that the rule `t.b` has no call. It then runs with no `select`
+and checks that all three give a result.
+
+**Assumptions:** None.
+
+#### `test_select_with_an_unknown_check_id_is_an_error`
+
+**Checks:** A check ID in `select` that no installed rule has is a `RunError` that names the
+ID.
+
+**How:** The test calls `run_checks` with `select=["t.a", "t.unknown"]` and checks the
+exception and its message.
+
+**Assumptions:** None.
+
+#### `test_a_required_check_runs_when_select_does_not_name_it`
+
+**Checks:** The checks that run are the selected checks and the required checks. A required
+check that `select` does not name runs and is marked as required.
+
+**How:** The test installs three rules and runs with `select=["t.a"]` and
+`required={"t.c": None}`. It compares the check ID and the `required` field of each
+result.
+
+**Assumptions:** None.
+
+#### `test_fast_only_runs_the_fast_checks_and_the_slow_required_checks`
+
+**Checks:** With `fast_only`, a slow check that is not required does not run, a slow check
+that `required` names runs (also when it names no target for it), and `fast_only` does not
+make a check required (R4).
+
+**How:** The test installs one fast rule and three slow rules. One slow rule is required
+for all targets, one has an empty list of target names in `required`, and one is not
+required. It runs with `fast_only=True` and compares the check ID and `required` of each
+result.
+
+**Assumptions:** None.
+
+#### `test_fast_only_with_select_removes_the_slow_selected_checks`
+
+**Checks:** With `fast_only` and `select`, a slow check that `select` names and that is not
+required does not run, and a fast check that `select` does not name does not run.
+
+**How:** The test installs two fast rules and one slow rule, and runs with
+`select=["t.fast", "t.slow"]` and `fast_only=True`. It checks that only `t.fast` gives a
+result.
+
+**Assumptions:** None.
+
+#### `test_a_path_is_read_one_time_for_each_target_with_the_opts_of_that_target`
+
+**Checks:** For a path, the run function reads the `.seq` file one time for each target,
+with the `Opts` of that target (decision 3): each target has its own `Sequence` object, and
+its `system.adc_dead_time` is the value of that target.
+
+**How:** The test replaces `pp.Sequence.read` with a function that counts its calls and
+calls the real one. It runs a `.seq` file of the spin-echo sequence for two targets with
+the ADC dead times 5 µs and 40 µs. It checks that there are two reads of the path, with two
+different objects, that the rule sees these objects in the order of the targets, that each
+has the dead time of its target and the number of blocks of the file.
+
+**Assumptions:** `Sequence.read` keeps the `Opts` of the constructor in `seq.system` (the
+test checks it only through the dead time). The test does not check that an ADC event of
+the file has the dead time.
+
+#### `test_a_path_that_cannot_be_read_is_an_error_that_names_the_file_and_the_target`
+
+**Checks:** An exception of the read of a `.seq` file is a `RunError` that names the file,
+the target and the exception type.
+
+**How:** The test runs a path that does not exist, and a file with text that is not a
+sequence, for the target `scanner`. It checks that the message has the path and the target
+name, and for the missing file `FileNotFoundError`.
+
+**Assumptions:** pypulseq raises an exception for a file that is not a sequence. The test
+does not check which one.
+
+#### `test_a_sequence_object_is_used_for_its_one_target`
+
+**Checks:** With a `Sequence` object and one target, the rule gets the same object, and the
+limits source is `"profile"`.
+
+**How:** The test runs a rule on an object and compares `ctx.sequence` with the object and
+`ctx.limits_source` with `"profile"`.
+
+**Assumptions:** None.
+
+#### `test_a_sequence_object_with_two_targets_is_an_error`
+
+**Checks:** A `Sequence` object with two targets is a `RunError` that says that an object
+gives exactly one target.
+
+**How:** The test calls `run_checks` with an object and two targets and checks the
+exception and its message.
+
+**Assumptions:** None.
+
+#### `test_no_target_is_an_error`
+
+**Checks:** An empty list or tuple of targets is a `RunError`, for a path and for an
+object.
+
+**How:** The test calls `run_checks` with no target and a path, and with no target and an
+object, and checks the exception and its message.
+
+**Assumptions:** None.
+
+#### `test_two_targets_with_one_name_are_an_error`
+
+**Checks:** Two targets with one name are a `RunError` that names it.
+
+**How:** The test calls `run_checks` with the targets `x`, `y`, `x` and checks the
+exception and its message.
+
+**Assumptions:** None.
+
+#### `test_limits_from_sequence_takes_the_limits_of_seq_system_for_a_target_with_none`
+
+**Checks:** With `limits_from_sequence=True`, a `Sequence` object and a target with neither
+`opts.max_grad` nor `opts.max_slew`, the context has `limits_source` `"sequence object"`
+and the limits of `seq.system` in mT/m and T/m/s with the label `"sequence object"`. A
+check that needs `opts.max_grad` and `opts.max_slew` is called, and the matrix records the
+limits source of the target.
+
+**How:** The test runs a rule with these two inputs on the spin-echo sequence (28 mT/m and
+150 T/m/s) and a target that gives no value. It checks the limits of the context with
+`pytest.approx`, the label, the limits source of the context and of `TargetInfo`, and that
+the result is "pass".
+
+**Assumptions:** The limits are the values of `SYSTEM` in `tests/synthetic.py`. The test
+does not check the conversion of the units in another way than through these values.
+
+#### `test_a_target_with_limits_keeps_its_limits_with_limits_from_sequence`
+
+**Checks:** With `limits_from_sequence=True`, a target that gives both limits keeps its own
+`hardware_limits` and the limits source `"profile"`.
+
+**How:** The test runs a rule on a target with both inputs and its own `HardwareLimits`. It
+compares `ctx.hardware_limits` with the profile limits, and the limits source of the
+context and of the matrix with `"profile"`.
+
+**Assumptions:** None.
+
+#### `test_a_target_with_one_limit_keeps_its_profile_with_limits_from_sequence`
+
+**Checks:** With `limits_from_sequence=True`, a target that gives only one of the two limits
+does not get the limits of the sequence: the limits source is `"profile"`, and a check that
+needs the other limit is "not evaluated".
+
+**How:** The test runs a rule with the inputs `opts.max_grad` and `opts.max_slew` on a
+target that gives only the first. It checks the limits source, the state and that the
+reason names `opts.max_slew`.
+
+**Assumptions:** None.
+
+#### `test_without_limits_from_sequence_a_target_with_no_limits_is_not_evaluated`
+
+**Checks:** Without the opt-in, a target with no gradient limits gives "not evaluated" for
+a check that needs one, also for a `Sequence` object, and the limits source is `"profile"`.
+
+**How:** The test runs a rule with the input `opts.max_grad` on an object and a target with
+no input. It checks the state, the limits source of the matrix and that the rule has no
+call.
+
+**Assumptions:** None.
+
+#### `test_limits_from_sequence_with_a_path_is_an_error`
+
+**Checks:** `limits_from_sequence=True` with a path, as a `str` or as a `Path`, is a
+`RunError`.
+
+**How:** The test calls `run_checks` with the path and the opt-in in both forms and checks
+the exception and that its message names `limits_from_sequence`.
+
+**Assumptions:** None.
+
+#### `test_has_input_is_true_for_a_value_path_of_the_profile_only_without_the_opt_in`
+
+**Checks:** `ctx.has_input` is True for a value path that the profile gives. With the limits
+source `"sequence object"` it is also True for `opts.max_grad` and `opts.max_slew`, and not
+for another path.
+
+**How:** The test makes a context for a target with `opts.max_grad`, without and with the
+limits source `"sequence object"`, and checks `opts.max_grad`, `opts.max_slew` and
+`opts.adc_dead_time`.
+
+**Assumptions:** The test calls `RunContext` directly, and does not use the run function.
+
+#### `test_check_rules_are_keyed_by_spec_id`
+
+**Checks:** `registry.check_rules()` gives a dict of the loaded rules by `spec.id`, in any
+order of the entry points.
+
+**How:** The test installs two fake entry points and compares the dict with the expected
+one.
+
+**Assumptions:** `ep.load()` of a real entry point gives the rule object. The test uses
+fake entry points and does not load a real one.
+
+#### `test_two_check_rules_with_one_id_are_an_error_that_names_both_packages`
+
+**Checks:** Two check entry points that give one check ID are a `RegistryError` that names
+the ID and both packages.
+
+**How:** The test installs two fake entry points with rules of the ID `t.a` and the
+packages `pkg-one` and `pkg-two`, and checks the exception and its message.
+
+**Assumptions:** The package name is `ep.dist.name` of the entry point.
+
+#### `test_a_check_entry_point_that_cannot_be_loaded_is_an_error_that_names_it`
+
+**Checks:** A check entry point whose `load` raises an exception is a `RegistryError` that
+names the entry point, its package and the exception type and message.
+
+**How:** The test installs a fake entry point whose `load` raises `ImportError` and checks
+the message.
+
+**Assumptions:** None.
+
+#### `test_a_check_entry_point_without_a_spec_is_an_error_that_names_it`
+
+**Checks:** A check entry point whose object has no `spec.id` is a `RegistryError` that
+names the entry point.
+
+**How:** The test installs a fake entry point that loads a plain `object()` and checks the
+message.
+
+**Assumptions:** None.
+
+#### `test_models_are_keyed_by_name_and_two_with_one_name_are_an_error`
+
+**Checks:** `registry.models()` gives the loaded models by `name`. Two models with one name
+are a `RegistryError` that names the name and the package of the first. The second
+entry point has no `dist`, and the error does not fail for it.
+
+**How:** The test installs two models with different names and compares the dict. It then
+installs two models with the name `m.one`, the second with no `dist`, and checks the
+message.
+
+**Assumptions:** None.
+
+#### `test_a_model_entry_point_that_cannot_be_loaded_is_an_error_that_names_it`
+
+**Checks:** A model entry point whose `load` raises an exception is a `RegistryError` that
+names the entry point and its package.
+
+**How:** The test installs a fake entry point whose `load` raises `RuntimeError` and checks
+the message.
+
+**Assumptions:** None.
+
+#### `test_profile_reader_gives_the_reader_by_name_or_none`
+
+**Checks:** `registry.profile_reader(name)` gives the loaded reader of that name, and
+`None` when no entry point has the name, also when there is no entry point in the group.
+
+**How:** The test installs two fake readers and calls the function for `siemens-asc`, for a
+name that is not installed, and with no entry point in the group.
+
+**Assumptions:** None.
+
+#### `test_two_profile_readers_with_one_name_are_an_error_that_names_both_packages`
+
+**Checks:** Two reader entry points with the name asked for are a `RegistryError` that
+names both packages. A different name is not affected.
+
+**How:** The test installs two fake readers named `siemens-asc` from `pkg-one` and
+`pkg-two`, checks the message of the error, and checks that a name that is not installed
+still gives `None`.
+
+**Assumptions:** None.
+
+### 2.11 Check configuration (`test_config.py`)
+
+These tests check `read_check_config`. They write small TOML and JSON files in `tmp_path`.
+No test reads a profile or uses the registry: the function does not read the target
+profiles, and it does not compare the check IDs with the installed checks (`run_checks`
+does).
+
+#### `test_a_toml_file_gives_the_config`
+
+**Checks:** A TOML file with each key gives the `CheckConfig` with the source path, the
+format version, the target paths relative to the file, `select`, `required` (`true` as
+`None`, a list as a tuple) and `fast_only`.
+
+**How:** The test writes the file and compares the result with an expected `CheckConfig`.
+
+**Assumptions:** None.
+
+#### `test_the_toml_and_json_forms_give_equal_configs`
+
+**Checks:** A TOML file and a JSON file with the same content give equal configs, except
+for the source path.
+
+**How:** The test reads both files and compares the two configs after it sets the source
+path of the second to that of the first.
+
+**Assumptions:** None.
+
+#### `test_a_file_with_only_format_and_targets_gives_the_defaults`
+
+**Checks:** With only `format` and `targets`, `select` is `None`, `required` is empty and
+`fast_only` is False, in TOML and in JSON.
+
+**How:** The test reads a TOML file and a JSON file with these two keys and checks the
+defaults and that the two configs are equal.
+
+**Assumptions:** None.
+
+#### `test_target_paths_are_relative_to_the_config_file_not_to_the_working_directory`
+
+**Checks:** The target paths are joined to the folder of the config file, as the function
+was called, and not resolved against the working directory. An absolute target path stays
+as it is.
+
+**How:** The test writes a file in a sub-folder, changes the working directory to its
+parent, and reads the file with a relative path and with an absolute path. It compares the
+target paths and the source path.
+
+**Assumptions:** The function does not call `resolve`, so a `..` stays in the path.
+
+#### `test_a_config_does_not_read_the_profiles_or_check_the_check_ids`
+
+**Checks:** A target file that does not exist, a check ID that no check has, and a target
+name in `required` that no profile has are not errors of `read_check_config`.
+
+**How:** The test writes a file with these names and checks that it reads and that the
+config has the values.
+
+**Assumptions:** `run_checks` makes these checks (tested in `test_run.py`).
+
+#### `test_config_error_is_an_error_of_the_run`
+
+**Checks:** `ConfigError` is a subclass of `CheckRunError`, so that the command gives exit
+status 1 for it.
+
+**How:** The test checks `issubclass`.
+
+**Assumptions:** The command catches `CheckRunError` (phase 6).
+
+#### `test_each_invalid_toml_config_is_an_error_that_names_the_file`
+
+**Checks:** Each invalid config in TOML is a `ConfigError` that names the file and the
+problem: no `format`, a newer format, a `format` that is not a whole number of 1 or more, no
+`targets`, `targets` that is empty, not a list, not of strings or with an empty path, a
+`select` that is not a list of strings, a `fast_only` that is not a boolean, a `required`
+that is not a table, a `required` value that is not `true` or a list of strings, an unknown
+key (also `limits_from_sequence`), and a file that is not valid TOML.
+
+**How:** The test is parametrized with the text of each file and a part of the expected
+message. For each one it writes the file, reads it, and checks the exception and that the
+message has the path of the file and that part.
+
+**Assumptions:** The tests check a part of the message and not the complete text.
+
+#### `test_a_newer_format_names_both_versions`
+
+**Checks:** A `format` above the version of the reader is a `ConfigError` that names the
+file, the version of the file and the version of the reader.
+
+**How:** The test writes a JSON file with `"format": 7` and checks that the message has the
+file, `version 7` and `version 1`.
+
+**Assumptions:** The version of the reader is 1.
+
+#### `test_each_invalid_json_config_is_an_error_that_names_the_file`
+
+**Checks:** The same rules apply to a JSON file: no `format`, an unknown key, a
+`fast_only` that is `null`, a `required` value that is `null`, a top level that is not an
+object, and a file that is not valid JSON are each a `ConfigError` that names the file.
+
+**How:** The test writes a file for each case, reads it, and checks that the message has
+the path and the part of the expected message.
+
+**Assumptions:** The test checks a part of the message and not the complete text.
+
+#### `test_a_missing_file_and_a_wrong_suffix_are_errors_that_name_the_file`
+
+**Checks:** A file that does not exist and a suffix that is not `.toml` or `.json` are each
+a `ConfigError` that names the file.
+
+**How:** The test reads a path that does not exist and a `.yaml` file that exists, and
+checks the exceptions and that the messages have the path.
 
 **Assumptions:** None.

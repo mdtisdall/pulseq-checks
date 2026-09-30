@@ -1,0 +1,12 @@
+format = 1
+name = "With asc"
+asc = "gpa/test.asc"
+asc_gradient_mode = "fast"
+
+[opts]
+rf_dead_time = 100e-6
+B0 = 2.89
+
+[rasters]
+GradientRasterTime = 10e-6
+rule = "multiple"
