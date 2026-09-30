@@ -27,8 +27,7 @@ this project:
   different tool. The hook blocks `git worktree add` and `git worktree move`
   to any other path.
 - Dependency sync, one time in each new worktree, before sub-agents start:
-  `nix develop --command uv sync --frozen` (after `pyproject.toml` exists;
-  until then there is nothing to sync)
+  `nix develop --command uv sync --frozen`
 - GitHub CLI: `direnv exec . gh ...`. It uses this repository's own
   fine-grained token in the git-ignored `.envrc.local`. The permissions that
   the token needs are in `.claude/gh-token-permissions`. `git` uses SSH.

@@ -1,0 +1,38 @@
+[project]
+name = "pulseq-checks"
+version = "0.1.0.dev0"
+description = "Check a Pulseq sequence against the limits of target scanners"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "pypulseq>=1.5.0.post1",
+    "numpy",
+    "scipy",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pulseq_checks"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+# pypulseq 1.5.0.post1 with four commits, from the fork (tag pulseq-reports-pin-1, branch
+# pulseq-reports-pin): the SAFE PNS filter as a recursion, calculate_pns in chunks, the
+# get_block fix for oversampled arbitrary gradients (upstream PR #424), and the read fix of
+# upstream #359. TODO.md ("Move from the pypulseq fork to a pypulseq release") lists them.
+# uv also applies this source for a project that depends on pulseq-checks by git URL; pip
+# does not.
+[tool.uv.sources]
+pypulseq = { git = "https://github.com/mdtisdall/pypulseq", rev = "a74ab06e51ca09707ff54837cf5ff652f6e69e94" }
+
+[tool.ruff]
+line-length = 100
