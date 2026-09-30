@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# All the checks that CI runs, in one command. Run it in the devShell:
+#
+#   nix develop --command scripts/check
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# The project has no Python code yet. The PR that adds pyproject.toml adds its
+# checks here:
+#
+#   uv sync --frozen
+#   uv run ruff check .
+#   uv run ruff format --check .
+#   uv run pytest -q
+
+echo "# shellcheck"
+shellcheck --severity=warning scripts/check .claude/hooks/block-main-writes.sh
+echo "ok    shellcheck"
