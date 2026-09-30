@@ -3,9 +3,11 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved (2026-09-30). The user approved the decisions of section
-2.4, with the version `0.1.0rc1` (decision 11), and answered the questions
-of section 7.
+Status: done (2026-09-30). Phases 0 to 9 are merged, and the release is
+`0.1.0rc1` (tag `v0.1.0rc1`). Section 8 gives the results and the changes to
+this plan during the work. The user approved the decisions of section 2.4,
+with the version `0.1.0rc1` (decision 11), and answered the questions of
+section 7.
 
 This is the implementation plan for step 2 of `docs/plans/pulseq-checks.md`
 (the design). The design gives the concepts and the decisions. This plan
@@ -1197,3 +1199,92 @@ None. The user answered the three questions on 2026-09-30:
    8).
 3. **The decisions of section 2.4.** Approved, with the version `0.1.0rc1`
    and the tag `v0.1.0rc1` (decision 11).
+
+## 8. Results
+
+All phases are merged into `main` on 2026-09-30:
+
+| Phase | PR | Merge commit |
+|---|---|---|
+| 0 Python scaffolding | #9 | `66ae3a5` |
+| 1 Move the measurement modules | #10 | `82990ea` |
+| 2 PNS with the hardware of a profile | #11 | `2f6da60` |
+| 3 The core | #12 | `b97c812` |
+| 4 The Siemens `.asc` profile reader | #13 | `162b02c` |
+| 5 The version 1 check rules | #14 | `f320963` |
+| 6 The command and the documents | #15 | `b63f308` |
+| 7 The comparison with the cards | #16 | `cd63ad1` |
+| 8 The time budget and the cost classes | #17 | `03be142` |
+| 9 Release 0.1.0rc1 | this PR | |
+
+### 8.1 Changes to this plan during the work
+
+Each change was approved by the user when it was made.
+
+- **Phase 1.** Fact 2 of section 2.3 gave the wrong lines of
+  `scripts/diagram_scale.py` (88 to 237). The builders are lines 89 to 230,
+  and they also use `copy`. Corrected in section 2.3 and section 4.2.
+- **Phase 3.** Sections 4.3 to 4.6 did not give the interfaces between
+  phases 2, 3 and 4. Section 4.9 was added: the `siemens-asc` reader, the
+  model entry point, the SAFE model (made in phase 2, registered in phase 5),
+  the link to a specification, and the order of phase 4 (its PR after
+  phase 3).
+- **Phase 4.** The `.asc` reader supplies no default (R2): SAFE parameters
+  without the gradient scale factors (pypulseq assumes 1/pi), and resonance
+  frequencies without their bandwidths, are errors.
+- **Phase 5.**
+  - R6 changed: version 1 has no rule for unequal rasters. The rasters of the
+    file must equal the rasters of the target, because whether a file with
+    other rasters plays correctly depends on the interpreter. The `rule` key
+    of `[rasters]` and `TargetProfile.raster_rule` were removed. `TODO.md`
+    has the study of specific interpreters.
+  - Section 4.7 assumed that `gradient_limits` refuses the rotation
+    extension. It did not, so a rotated file passed the gradient checks.
+    `gradient_limits` now refuses it, as `pns_levels` does.
+  - For a pass or a fail, `reason` gives a short detail of the value (the
+    axis, the raster, the first timing error). Design section 5.3 records it.
+  - The example profiles got the full SAFE parameters of pypulseq's example
+    hardware; the tests of phase 3 had used a model that checked only the
+    names.
+- **Phase 6.** The command gives status 1, not argparse's 2, for an error in
+  the arguments, because 2 means "a check failed".
+- **Phase 7.** A fourth limit set, `timing-fail`, was added so that the
+  timing error lists are compared on failures. The user accepted one
+  difference of rule that the set cannot show: the PNS card fails from
+  99.995 % (it rounds to 0.01), `pns.safe` from 100 % (decision 5).
+- **Phase 8.** The dependency of phase 8 on phase 6 (`docs/checks.md`) was not
+  in section 3.3; the PR of phase 8 was rebased on phase 6.
+
+### 8.2 The comparison (phase 7)
+
+`docs/comparison.md`: 9 sequences (the synthetic sequences,
+`build_repeating(1000)`, `build_worst(1000)` and the ex-vivo file) and 4
+limit sets give 180 pairs of a new check and a card. All 180 are equal.
+
+### 8.3 The time budget (phase 8 and this phase)
+
+Apple M1 Max, macOS 26.6.2, Python 3.12.14, pypulseq 1.5.0.post1, 10^6
+blocks. Each time includes the one read of the `.seq` file.
+
+| Check | Class | Phase 8 (median of 3) | Before the tag (`0.1.0rc1`) |
+|---|---|---|---|
+| read only | | 3.61 s | 3.57 s |
+| `timing.rasters` | fast | 3.63 s | 3.52 s |
+| `gradient.amplitude.axis` | fast | 4.34 s | 4.20 s |
+| `gradient.slew.axis` | fast | 4.30 s | 4.24 s |
+| `gradient.amplitude.any-orientation` | fast | 4.38 s | 4.17 s |
+| `pns.safe` | slow | 14.14 s | 13.76 s |
+| `timing.pypulseq` | slow | 14.26 s | 13.92 s |
+| the fast checks together | | 4.19 s | 4.17 s |
+| all six checks | | 24.82 s | 23.82 s |
+
+The budget of the fast checks together (decision 7) is 10 s for 10^6
+blocks on this machine, with the read. `tests/test_budget.py` uses
+`CI_BUDGET_S` = 3.3 s for 10^5 blocks.
+
+### 8.4 The release
+
+- The version `0.1.0rc1` and the tag `v0.1.0rc1` on the merge commit of this
+  phase. `CHANGELOG.md` has the entry.
+- pulseq-reports can start its step 1 (after phase 7) and its step 3 with
+  the tag `v0.1.0rc1`.
