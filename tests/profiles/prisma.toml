@@ -17,13 +17,43 @@ GradientRasterTime = 10e-6
 RadiofrequencyRasterTime = 1e-6
 AdcRasterTime = 100e-9
 BlockDurationRaster = 10e-6
-rule = "equal"
 
+# The SAFE parameters of pypulseq's example hardware (safe_example_hw), not of a real scanner.
 [models.pns.safe]
-name = "test model"
-x = { a1 = 0.5 }
-y = { a1 = 0.6 }
-z = { a1 = 0.7 }
+name = "pypulseq example hardware (not a real scanner)"
+
+[models.pns.safe.x]
+tau1 = 0.2
+tau2 = 0.03
+tau3 = 3.0
+a1 = 0.4
+a2 = 0.1
+a3 = 0.5
+stim_limit = 30.0
+stim_thresh = 24.0
+g_scale = 0.35
+
+[models.pns.safe.y]
+tau1 = 1.5
+tau2 = 2.5
+tau3 = 0.15
+a1 = 0.55
+a2 = 0.15
+a3 = 0.3
+stim_limit = 15.0
+stim_thresh = 12.0
+g_scale = 0.31
+
+[models.pns.safe.z]
+tau1 = 2.0
+tau2 = 0.12
+tau3 = 1.0
+a1 = 0.42
+a2 = 0.4
+a3 = 0.18
+stim_limit = 25.0
+stim_thresh = 20.0
+g_scale = 0.25
 
 [acoustic]
 resonances = [[590, 100], [1140, 220]]

@@ -15,6 +15,17 @@ dependencies = [
 [project.entry-points."pulseq_checks.profile_readers"]
 siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
 
+[project.entry-points."pulseq_checks.models"]
+"pns.safe" = "pulseq_checks.pns_levels:SAFE_MODEL"
+
+[project.entry-points."pulseq_checks.checks"]
+"timing.rasters" = "pulseq_checks.checks.timing:RASTERS"
+"timing.pypulseq" = "pulseq_checks.checks.timing:PYPULSEQ"
+"gradient.amplitude.axis" = "pulseq_checks.checks.gradient:AMPLITUDE_AXIS"
+"gradient.slew.axis" = "pulseq_checks.checks.gradient:SLEW_AXIS"
+"gradient.amplitude.any-orientation" = "pulseq_checks.checks.gradient:AMPLITUDE_ANY_ORIENTATION"
+"pns.safe" = "pulseq_checks.checks.pns:SAFE"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

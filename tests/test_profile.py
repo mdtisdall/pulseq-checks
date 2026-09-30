@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pypulseq.utils.safe_pns_prediction import safe_example_hw
 
 from pulseq_checks import registry
 from pulseq_checks.profile import (
@@ -18,7 +19,19 @@ from pulseq_checks.results import CheckRunError
 
 PROFILES = Path(__file__).parent / "profiles"
 BASE = {"format": 1, "name": "Test target"}
-SAFE_PARAMS = {"name": "test model", "x": {"a1": 0.5}, "y": {"a1": 0.6}, "z": {"a1": 0.7}}
+SAFE_FIELDS = ("tau1", "tau2", "tau3", "a1", "a2", "a3", "stim_limit", "stim_thresh", "g_scale")
+# The SAFE parameters of pypulseq's example hardware, as the example profiles give them.
+SAFE_PARAMS = {
+    "name": "pypulseq example hardware (not a real scanner)",
+    **{
+        axis: {
+            field: float(getattr(getattr(safe_example_hw(), axis), field)) for field in SAFE_FIELDS
+        }
+        for axis in "xyz"
+    },
+}
+# The models that the installed packages give, before the autouse fixture replaces them.
+INSTALLED_MODELS = registry.models
 
 
 class SafeLikeModel:
@@ -128,7 +141,6 @@ def test_the_example_of_plan_section_4_3_reads_to_the_expected_values():
         "AdcRasterTime": 100e-9,
         "BlockDurationRaster": 10e-6,
     }
-    assert profile.raster_rule == "equal"
     assert profile.models == {"pns.safe": {"checked": True, **SAFE_PARAMS}}
     assert profile.acoustic_resonances == ((590.0, 100.0), (1140.0, 220.0))
     assert profile.unused_sections == ()
@@ -147,6 +159,18 @@ def test_an_example_file_converted_to_json_reads_to_an_equal_profile(tmp_path, n
     from_json = read_profile(json_path)
 
     assert replace(from_toml, source_path=None) == replace(from_json, source_path=None)
+
+
+@pytest.mark.parametrize("name", ["prisma", "minimal", "hz_units", "unused"])
+def test_an_example_file_reads_with_the_installed_models(monkeypatch, name):
+    """Each example profile is valid for the models that this package installs (the SAFE
+    model `pns.safe`), not only for the test model of the other tests."""
+    monkeypatch.setattr(registry, "models", INSTALLED_MODELS)
+
+    profile = read_profile(PROFILES / f"{name}.toml")
+
+    if name in ("prisma", "unused"):
+        assert profile.models == {"pns.safe": SAFE_PARAMS}
 
 
 def test_the_path_can_be_a_string_and_source_path_is_resolved(monkeypatch):
@@ -346,19 +370,10 @@ def test_each_raster_name_is_read_and_given_to_its_opts_keyword(write_json):
 
 
 @pytest.mark.parametrize("rule", ["equal", "multiple"])
-def test_the_raster_rule_is_read(write_json, rule):
-    profile = read_profile(write_json({**BASE, "rasters": {"rule": rule}}))
-
-    assert profile.raster_rule == rule
-    assert profile.rasters is None
-    assert profile.sources == {"rasters.rule": "profile"}
-
-
-@pytest.mark.parametrize("rule", ["exact", "", 1, None])
-def test_another_raster_rule_is_an_error(write_json, rule):
+def test_a_raster_rule_is_an_error_because_the_check_needs_equal_rasters(write_json, rule):
     path = write_json({**BASE, "rasters": {"rule": rule}})
 
-    with pytest.raises(ProfileError, match="rasters.rule"):
+    with pytest.raises(ProfileError, match=r"rasters\.rule.*needs equal rasters"):
         read_profile(path)
 
 
@@ -557,7 +572,6 @@ def test_a_profile_with_the_name_only_has_no_default_value():
         opts=None,
         hardware_limits=None,
         rasters=None,
-        raster_rule=None,
         models={},
         acoustic_resonances=None,
         sources={},
@@ -581,7 +595,7 @@ def test_the_sources_name_each_value_that_the_profile_gives():
     expected = (
         [f"opts.{key}" for key in profile.opts]
         + [f"rasters.{name}" for name in RASTER_OPTS]
-        + ["rasters.rule", "models.pns.safe", "acoustic.resonances"]
+        + ["models.pns.safe", "acoustic.resonances"]
     )
     assert sorted(profile.sources) == sorted(expected)
     assert set(profile.sources.values()) == {"profile"}
@@ -592,7 +606,7 @@ def test_has_value_is_true_for_a_path_in_the_sources_only(write_json):
 
     assert profile.has_value("opts.B0")
     assert not profile.has_value("opts.max_grad")
-    assert not profile.has_value("rasters.rule")
+    assert not profile.has_value("rasters.GradientRasterTime")
 
 
 def test_make_opts_builds_pp_opts_from_the_opts_and_the_rasters():
@@ -636,14 +650,13 @@ def test_the_sections_of_the_asc_reader_are_merged_with_the_values_of_the_profil
         "asc": "gpa.asc",
         "asc_gradient_mode": "fast",
         "opts": {"B0": 3.0},
-        "rasters": {"GradientRasterTime": 10e-6, "rule": "equal"},
+        "rasters": {"GradientRasterTime": 10e-6},
     }
 
     profile = read_profile(write_json(data))
 
     assert profile.opts == {**ASC_SECTIONS["opts"], "B0": 3.0}
     assert profile.rasters == {"GradientRasterTime": 10e-6}
-    assert profile.raster_rule == "equal"
     assert profile.acoustic_resonances == ((590.0, 100.0),)
     assert profile.models == {"pns.safe": {"checked": True, **SAFE_PARAMS}}
 
@@ -652,13 +665,12 @@ def test_the_sources_label_each_value_with_the_profile_or_the_label_of_the_reade
     install_reader, write_json
 ):
     install_reader(FakeReader(ASC_SECTIONS, ASC_SOURCES))
-    data = {**BASE, "asc": "gpa.asc", "opts": {"B0": 3.0}, "rasters": {"rule": "equal"}}
+    data = {**BASE, "asc": "gpa.asc", "opts": {"B0": 3.0}}
 
     profile = read_profile(write_json(data))
 
     assert dict(profile.sources) == {
         "opts.B0": "profile",
-        "rasters.rule": "profile",
         **ASC_SOURCES,
     }
     assert profile.has_value("opts.max_grad")

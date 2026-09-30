@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 import pypulseq as pp
 
+from .extensions import refuse_rotations
 from .seq_index import SequenceIndex, block_cache_off, grad_events, sequence_index
 from .seq_utils import GAMMA, TIME_TOLERANCE, gradient_points
 
@@ -558,7 +559,11 @@ def gradient_limits(
     blocks of the range. It reads individual blocks with `get_block` only for the few blocks
     that a range edge cuts, so its cost does not grow with the number of blocks the way that
     reading every block would.
+
+    Raises NotImplementedError for a sequence with the rotation extension
+    (`extensions.refuse_rotations`): the numbers are of the logical axes as they are stored.
     """
+    refuse_rotations(seq)
     if limits is None:
         limits = _default_limits(seq)
 

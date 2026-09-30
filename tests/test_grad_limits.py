@@ -11,6 +11,7 @@ from synthetic import (
     gre_sequence,
     spin_echo_sequence,
 )
+from test_extensions import _with_rotation_library
 
 from pulseq_checks.grad_limits import GradientLimits, gradient_limits
 from pulseq_checks.seq_index import grad_events, sequence_index
@@ -692,3 +693,11 @@ def test_matches_oracle_on_random_gradient_sequences(seed):
             tol,
             f"whole_rms_mt_per_m[{axis}]",
         )
+
+
+def test_gradient_limits_refuses_rotations():
+    """`gradient_limits` raises `NotImplementedError` for a sequence with a rotation library
+    (`extensions.refuse_rotations`): its numbers are of the logical axes as they are
+    stored."""
+    with pytest.raises(NotImplementedError, match="rotation extension"):
+        gradient_limits(_with_rotation_library())

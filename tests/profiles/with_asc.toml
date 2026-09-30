@@ -9,4 +9,3 @@ B0 = 2.89
 
 [rasters]
 GradientRasterTime = 10e-6
-rule = "multiple"
