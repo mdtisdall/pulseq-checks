@@ -5,6 +5,8 @@ import math
 import numpy as np
 import pypulseq as pp
 
+from pulseq_checks.seq_utils import GAMMA
+
 SYSTEM = pp.Opts(
     max_grad=28,
     grad_unit="mT/m",
@@ -129,4 +131,40 @@ def border_sequence() -> pp.Sequence:
     seq = pp.Sequence(SYSTEM)
     seq.add_block(g1)
     seq.add_block(g2)
+    return seq
+
+
+RASTER_4US = 4e-6  # s
+# The junction step of `raster_4us_sequence` divided by RASTER_4US, in T/m/s.
+RASTER_4US_JUNCTION = 60.0
+# The time of the junction in `raster_4us_sequence`, s.
+RASTER_4US_JUNCTION_TIME = 800e-6
+
+
+def raster_4us_sequence() -> pp.Sequence:
+    """Two y extended trapezoids, built with a 4 µs gradient raster. Block 1 ramps from 0 to
+    16 mT/m in 400 µs (40 T/m/s) and stays there for 400 µs. Block 2 starts at 15.76 mT/m, a
+    step of 0.24 mT/m, stays there for 400 µs and ramps to 0 in 400 µs (39.4 T/m/s). The
+    junction step divided by 4 µs is 60 T/m/s, and divided by 10 µs is 24 T/m/s. No segment
+    slope is above 40 T/m/s."""
+    system = pp.Opts(
+        max_grad=100,
+        grad_unit="mT/m",
+        max_slew=200,
+        slew_unit="T/m/s",
+        grad_raster_time=RASTER_4US,
+    )
+    top = 16e-3 * GAMMA  # Hz/m
+    start = 15.76e-3 * GAMMA  # Hz/m
+    seq = pp.Sequence(system)
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="y", times=[0.0, 400e-6, 800e-6], amplitudes=[0.0, top, top], system=system
+        )
+    )
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="y", times=[0.0, 400e-6, 800e-6], amplitudes=[start, start, 0.0], system=system
+        )
+    )
     return seq

@@ -59,6 +59,11 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   evaluated" and `hardware_limits` was None, although `docs/usage.md` said that
   `rise_time` gives the slew limit. `TargetProfile.has_value("opts.max_slew")`
   is true for such a profile.
+  The step at a block junction is divided by the gradient raster of the file
+  (`seq.grad_raster_time`), not by the raster of the target or the pypulseq
+  default. Before, a file with a 4 µs raster read with a 10 µs target had
+  junction steps 2.5 times too small. A difference between the rasters of the
+  file and of the target is the subject of `timing.rasters`.
 
 ## 0.1.0rc1 (2026-09-30)
 

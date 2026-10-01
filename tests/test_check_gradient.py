@@ -1,11 +1,17 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pypulseq as pp
 import pytest
 from pypulseq.event_lib import EventLibrary
-from synthetic import SYSTEM, empty_sequence
+from synthetic import (
+    RASTER_4US_JUNCTION,
+    RASTER_4US_JUNCTION_TIME,
+    SYSTEM,
+    empty_sequence,
+    raster_4us_sequence,
+)
 
 from pulseq_checks import registry
 from pulseq_checks.checks import gradient as gradient_module
@@ -497,3 +503,24 @@ def test_the_spec_sets_each_field(check):
     for text in (spec.title, spec.quantity, spec.limit, spec.tolerance, spec.pass_condition):
         assert isinstance(text, str)
         assert text.strip()
+
+
+@pytest.mark.parametrize(
+    "rasters", [None, {"GradientRasterTime": 4e-6}, {"GradientRasterTime": 10e-6}]
+)
+def test_the_slew_of_a_junction_uses_the_gradient_raster_of_the_file_for_any_target(
+    monkeypatch, tmp_path, rasters
+):
+    install(monkeypatch, SLEW_AXIS)
+    path = tmp_path / "raster_4us.seq"
+    raster_4us_sequence().write(str(path))
+    profile = replace(make_profile(max_slew=50.0), rasters=rasters)
+
+    (result,) = run_checks(path, [profile]).results
+
+    assert result.state is State.FAIL
+    # The file stores the amplitudes with fewer digits: 2e-5 relative in the value.
+    assert result.value == pytest.approx(RASTER_4US_JUNCTION, rel=1e-4)
+    assert result.location is not None
+    assert result.location.block == 2
+    assert result.location.time_s == pytest.approx(RASTER_4US_JUNCTION_TIME)

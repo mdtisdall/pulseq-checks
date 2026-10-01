@@ -1447,6 +1447,23 @@ credited to the second block, and that `slew_time_s` is the junction (0.2 ms).
 
 **Assumptions:** None.
 
+#### `test_junction_step_uses_the_gradient_raster_of_the_file_not_of_seq_system`
+
+**Checks:** The step at a block junction is divided by the gradient raster of the
+sequence, `seq.grad_raster_time` (the `GradientRasterTime` that the file declares),
+not by `seq.system.grad_raster_time`. A sequence read from a file gives the same value
+as the sequence object that wrote it.
+
+**How:** `raster_4us_sequence` builds two y extended trapezoids with a 4 µs gradient
+raster: the slopes are 40 and 39.4 T/m/s and the junction step is 0.24 mT/m, so the
+junction is 60 T/m/s with 4 µs (24 T/m/s with 10 µs). The test writes the sequence to
+a file in `tmp_path` and reads it with `pp.Sequence()`, whose `system` has 10 µs. For
+the sequence that was read and for the sequence object, it checks that the y slew is
+60 T/m/s, credited to the second block, at the junction (0.8 ms).
+
+**Assumptions:** The file stores the amplitudes with fewer digits than the sequence
+object, so the comparison has a relative tolerance of 1e-4.
+
 #### `test_gradient_ending_non_zero_before_a_block_with_no_gradient_is_a_junction_step`
 
 **Checks:** A gradient that ends at a non-zero value (within the tolerance
@@ -4486,6 +4503,22 @@ with a character that is not white space.
 
 **Assumptions:** The test does not check the text of the specification: a person reads it
 in `docs/checks.md` (phase 6). It does not check the entry points in `pyproject.toml`.
+
+#### `test_the_slew_of_a_junction_uses_the_gradient_raster_of_the_file_for_any_target`
+
+**Checks:** `gradient.slew.axis` measures the junction step with the gradient raster
+of the file, for a target with no `[rasters]`, with `GradientRasterTime = 4e-6` and
+with `GradientRasterTime = 10e-6`. Each run fails with the junction value, at the
+second block, at the time of the junction.
+
+**How:** The test writes `raster_4us_sequence` (4 µs gradient raster, slopes 40 and
+39.4 T/m/s, junction 60 T/m/s) to a file in `tmp_path` and calls `run_checks` with the
+path and a profile with `max_slew = 50`. For each of the three profiles it checks
+that the state is fail, the value is 60 T/m/s, the block is 2 and the time is 0.8 ms.
+Before the fix, the profiles with no rasters and with 10 µs gave 40 T/m/s and passed.
+
+**Assumptions:** The file stores the amplitudes with fewer digits, so the value has a
+relative tolerance of 1e-4.
 
 ### 2.15 PNS check (`test_check_pns.py`)
 

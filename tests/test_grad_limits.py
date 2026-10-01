@@ -5,10 +5,14 @@ import pypulseq as pp
 import pytest
 from oracles import grad_limits as oracle
 from synthetic import (
+    RASTER_4US,
+    RASTER_4US_JUNCTION,
+    RASTER_4US_JUNCTION_TIME,
     SYSTEM,
     arbitrary_gradient_sequence,
     empty_sequence,
     gre_sequence,
+    raster_4us_sequence,
     spin_echo_sequence,
 )
 from test_extensions import _with_rotation_library
@@ -356,6 +360,30 @@ def test_junction_step_between_extended_trapezoids_is_reported_as_the_slew():
     assert result.axes["x"].max_slew_t_per_m_per_s == pytest.approx(expected_slew_t_per_m_per_s)
     assert result.axes["x"].slew_block == block_b_id
     assert result.axes["x"].slew_time_s == pytest.approx(200e-6)
+
+
+def test_junction_step_uses_the_gradient_raster_of_the_file_not_of_seq_system(tmp_path):
+    """A sequence built with a 4 µs gradient raster, written to a file and read with
+    `pp.Sequence()` (10 µs in `seq.system`): the junction step is divided by 4 µs, the
+    raster of the file. The sequence object before the write gives the same value."""
+    built = raster_4us_sequence()
+    path = tmp_path / "raster_4us.seq"
+    built.write(str(path))
+    read = pp.Sequence()
+    read.read(str(path))
+    assert read.system.grad_raster_time == pytest.approx(10e-6)
+    assert read.grad_raster_time == pytest.approx(RASTER_4US)
+    _block_a_id, block_b_id = built.block_events
+
+    for seq in (read, built):
+        result = gradient_limits(seq)
+
+        # The file stores the amplitudes with fewer digits: 2e-5 relative in the value.
+        assert result.axes["y"].max_slew_t_per_m_per_s == pytest.approx(
+            RASTER_4US_JUNCTION, rel=1e-4
+        )
+        assert result.axes["y"].slew_block == block_b_id
+        assert result.axes["y"].slew_time_s == pytest.approx(RASTER_4US_JUNCTION_TIME)
 
 
 def test_gradient_ending_non_zero_before_a_block_with_no_gradient_is_a_junction_step():
