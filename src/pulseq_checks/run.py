@@ -13,7 +13,7 @@ import pypulseq as pp
 from . import registry
 from .grad_limits import HardwareLimits
 from .profile import TargetProfile
-from .results import CheckRunError, Result, ResultMatrix, State, TargetInfo
+from .results import CheckRunError, Finding, Result, ResultMatrix, State, TargetInfo
 from .rules import CheckRule, RunContext
 from .seq_utils import GAMMA
 
@@ -170,8 +170,9 @@ def _hardware_limits(
 
 def _run_rule(rule: CheckRule, ctx: RunContext) -> Result:
     """The result of `rule` for the target of `ctx`: "not evaluated" before `run` when an
-    input or a model is missing, "error" when `run` raises an exception or gives a result
-    of a different check or target."""
+    input or a model is missing, "error" when `run` raises an exception, gives a result
+    of a different check or target, gives findings that are not a tuple of `Finding`, or
+    gives a `findings_omitted` that is not an `int` (not a `bool`) of 0 or more."""
     spec = rule.spec
     missing = [f"input {path}" for path in spec.inputs if not ctx.has_input(path)]
     missing += [f"model {name}" for name in spec.models if name not in ctx.profile.models]
@@ -188,6 +189,20 @@ def _run_rule(rule: CheckRule, ctx: RunContext) -> Result:
         reason = (
             f"the check gave a result for the check {result.check_id!r} and the target "
             f"{result.target!r}, not for {spec.id!r} and {ctx.profile.name!r}"
+        )
+    elif not isinstance(result.findings, tuple):
+        reason = f"the check gave findings as a {type(result.findings).__name__}, not a tuple"
+    elif any(not isinstance(f, Finding) for f in result.findings):
+        bad = next(f for f in result.findings if not isinstance(f, Finding))
+        reason = f"the check gave a finding of type {type(bad).__name__}, not a Finding"
+    elif (
+        not isinstance(result.findings_omitted, int)
+        or isinstance(result.findings_omitted, bool)
+        or result.findings_omitted < 0
+    ):
+        reason = (
+            f"the check gave findings_omitted {result.findings_omitted!r}, "
+            "not an integer of 0 or more"
         )
     else:
         return result

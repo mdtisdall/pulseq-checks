@@ -3,7 +3,7 @@
 from .config import CheckConfig, ConfigError, read_check_config
 from .grad_limits import HardwareLimits
 from .profile import ProfileError, TargetProfile, read_profile
-from .results import CheckRunError, Location, Result, ResultMatrix, State, TargetInfo
+from .results import CheckRunError, Finding, Location, Result, ResultMatrix, State, TargetInfo
 from .rules import CheckRule, CheckSpec, RunContext
 from .run import RunError, run_checks
 
@@ -13,6 +13,7 @@ __all__ = [
     "CheckRunError",
     "CheckSpec",
     "ConfigError",
+    "Finding",
     "HardwareLimits",
     "Location",
     "ProfileError",

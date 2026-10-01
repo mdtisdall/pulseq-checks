@@ -38,6 +38,8 @@ Peak gradient amplitude under any orientation
 
 **pypulseq function:** None
 
+**Findings:** None
+
 ## `gradient.amplitude.axis`
 
 Peak gradient amplitude of each logical axis
@@ -59,6 +61,8 @@ Peak gradient amplitude of each logical axis
 **Pass condition:** Pass when the peak of each axis is at or below limit * (1 + 1e-9). Fail when the peak of any axis is above it. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file.
 
 **pypulseq function:** None
+
+**Findings:** None
 
 ## `gradient.slew.axis`
 
@@ -82,6 +86,8 @@ Peak gradient slew rate of each logical axis
 
 **pypulseq function:** None
 
+**Findings:** None
+
 ## `pns.safe`
 
 Peripheral nerve stimulation, SAFE model
@@ -104,6 +110,8 @@ Peripheral nerve stimulation, SAFE model
 
 **pypulseq function:** `_safe_gwf_to_pns_chunk` and `calc_pns` of pypulseq.utils.safe_pns_prediction (the pinned fork)
 
+**Findings:** None
+
 ## `timing.pypulseq`
 
 Timing check of pypulseq with the system of the target
@@ -125,6 +133,8 @@ Timing check of pypulseq with the system of the target
 **Pass condition:** Pass when check_timing gives no error. Fail when it gives one or more errors. The result location is the first error in the play order of the blocks: its block ID, and the start time of that block in seconds. check_timing does not change the sequence, except that it fills the block cache of the sequence object (a dictionary of the blocks that it read); this check turns the cache off, so that the other checks of the target see the same sequence, and a sequence of many blocks does not keep all its blocks in memory.
 
 **pypulseq function:** Sequence.check_timing
+
+**Findings:** None
 
 ## `timing.rasters`
 
@@ -151,3 +161,5 @@ Version 1 has no rule for rasters that are not equal. Whether a file with other 
 A raster that the file does not declare is an error, not a fail: the specification requires the four definitions from format 1.4.0, and pypulseq 1.5.0 writes them, but pypulseq uses the raster of the target for a missing definition, so the check has no value to compare. A file of a format older than 1.4.0 declares no raster, and pypulseq fills the four definitions with the rasters of the target when it reads the file. For such a file the check compares the rasters of the target with themselves and passes.
 
 **pypulseq function:** None
+
+**Findings:** None

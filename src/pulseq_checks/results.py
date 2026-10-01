@@ -1,23 +1,25 @@
 """The results of a check run (design section 5.3): `State`, `Location`, `Result`,
-`TargetInfo` and `ResultMatrix`, with its exit status (design section 5.6) and its JSON form
-(decision 9 of the plan). Also `CheckRunError`, the base of each error of the run.
+`Finding`, `TargetInfo` and `ResultMatrix`, with its exit status (design section 5.6) and its
+JSON form (decision 9 of the plan, and plan check-findings, section 4.5). Also
+`CheckRunError`, the base of each error of the run.
 
 The JSON form cannot hold a float that is not finite (strict JSON), so `to_json` writes
 infinity and "not a number" as the strings "inf", "-inf" and "nan", and `from_json` reads
-them back in the float fields. A matrix with "nan" does not compare equal to itself, because
-`nan != nan`."""
+them back in the float fields, and in the values of the `data` of a finding. A matrix with
+"nan" does not compare equal to itself, because `nan != nan`."""
 
 from __future__ import annotations
 
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from typing import Any
 
-# The version of the JSON form of a `ResultMatrix` (the "format" key).
-FORMAT = 1
+# The version of the JSON form of a `ResultMatrix` (the "format" key). `from_json` reads this
+# format and format 1, which has no findings.
+FORMAT = 2
 
 
 class CheckRunError(Exception):
@@ -41,6 +43,53 @@ class Location:
     time_s: float
 
 
+# The strings that stand for a float that is not finite in the JSON form.
+_NON_FINITE = ("inf", "-inf", "nan")
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One problem that a check found (plan check-findings, section 4.1).
+
+    `code` is a short, stable name of the kind of finding. `message` is one line of text for a
+    person. `location` is where the finding occurs, or None. `data` holds the values of the
+    finding by name, for a machine: only JSON scalars. A string value of `data` cannot be
+    "inf", "-inf" or "nan", because the JSON form writes a float that is not finite as one of
+    these strings. A `Finding` with data is not hashable, as `TargetInfo` is not."""
+
+    code: str
+    message: str
+    location: Location | None = None
+    data: Mapping[str, str | int | float | bool | None] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.code, str):
+            raise TypeError(f"the code of a finding must be a string, not {self.code!r}")
+        if not self.code:
+            raise ValueError("the code of a finding must not be empty")
+        if not isinstance(self.message, str):
+            raise TypeError(f"the message of a finding must be a string, not {self.message!r}")
+        if self.location is not None and not isinstance(self.location, Location):
+            raise TypeError(
+                f"the location of a finding must be a Location or None, not {self.location!r}"
+            )
+        if not isinstance(self.data, Mapping):
+            raise TypeError(f"the data of a finding must be a mapping, not {self.data!r}")
+        for key, value in self.data.items():
+            if not isinstance(key, str):
+                raise TypeError(f"a key of the data of a finding must be a string, not {key!r}")
+            if value is not None and not isinstance(value, (str, int, float)):
+                raise TypeError(
+                    f"the data value {key!r} of a finding must be a string, a number, a bool "
+                    f"or None, not {value!r}"
+                )
+            if isinstance(value, str) and value in _NON_FINITE:
+                raise ValueError(
+                    f"the data value {key!r} of a finding must not be the string {value!r}: "
+                    "the JSON form uses it for a float that is not finite"
+                )
+
+
 @dataclass(frozen=True)
 class Result:
     """The result of one check for one target (design section 5.3, plan section 4.5).
@@ -48,7 +97,10 @@ class Result:
     `reason` is necessary for "not evaluated" and "error". For "pass" and "fail" it can give a
     short detail of the value, for example "axis y" (design section 5.3). `required` is True
     when the caller named the check for this target (decision 3). `spec_url` links to the
-    specification."""
+    specification. `findings` are the problems that the check found, in the order that the
+    check gave them, for a result of any state (plan check-findings, section 4.2).
+    `findings_omitted` is the number of findings that are not in `findings` because
+    `ResultMatrix.with_max_findings` removed them. The findings do not change the state."""
 
     check_id: str
     spec_version: int
@@ -63,6 +115,8 @@ class Result:
     reason: str | None = None
     required: bool = False
     spec_url: str | None = None
+    findings: tuple[Finding, ...] = ()
+    findings_omitted: int = 0
 
 
 @dataclass(frozen=True)
@@ -101,6 +155,26 @@ class ResultMatrix:
             return 2
         return 0
 
+    def with_max_findings(self, n: int) -> ResultMatrix:
+        """A new matrix in which each result with more than `n` findings keeps the first `n`,
+        and `findings_omitted` has the number of the others added. `n` must be an `int` of 0
+        or more, else `ValueError`."""
+        if not isinstance(n, int) or isinstance(n, bool):
+            raise ValueError(f"the maximum number of findings must be an integer, not {n!r}")  # noqa: TRY004
+        if n < 0:
+            raise ValueError(f"the maximum number of findings must be 0 or more, not {n}")
+        results = tuple(
+            r
+            if len(r.findings) <= n
+            else replace(
+                r,
+                findings=r.findings[:n],
+                findings_omitted=r.findings_omitted + len(r.findings) - n,
+            )
+            for r in self.results
+        )
+        return replace(self, results=results)
+
     def to_json(self) -> str:
         """One JSON object with `"format": FORMAT` (decision 9). The keys are in a fixed
         order; a float that is not finite is written as a string (module docstring)."""
@@ -125,7 +199,8 @@ class ResultMatrix:
     def from_json(cls, text: str) -> ResultMatrix:
         """The matrix of `to_json`: `from_json(m.to_json()) == m`. A format above `FORMAT`
         is a `ValueError` that names both versions. An unknown key or a missing key in any
-        object is a `ValueError` that names it."""
+        object is a `ValueError` that names it. A result object of format 1 has no findings
+        keys: its result has no findings."""
         # A value of a wrong type is a `ValueError` too (hence the `noqa: TRY004`): a caller
         # of `from_json` catches one type for a bad text.
         obj = json.loads(text)
@@ -157,7 +232,7 @@ class ResultMatrix:
             sequence=obj["sequence"],
             package_version=obj["package_version"],
             targets=tuple(targets),
-            results=tuple(_result_from_obj(r) for r in _list(obj["results"], "results")),
+            results=tuple(_result_from_obj(r, version) for r in _list(obj["results"], "results")),
         )
 
 
@@ -165,6 +240,10 @@ class ResultMatrix:
 # it is not finite).
 _FLOAT_FIELDS = ("value", "limit")
 _RESULT_KEYS = tuple(f.name for f in fields(Result))
+_FINDING_KEYS = tuple(f.name for f in fields(Finding))
+# The result keys that format 1 does not have.
+_FINDINGS_KEYS = ("findings", "findings_omitted")
+_RESULT_KEYS_FORMAT_1 = tuple(k for k in _RESULT_KEYS if k not in _FINDINGS_KEYS)
 
 
 def _float_to_json(x: float | None) -> float | str | None:
@@ -176,11 +255,51 @@ def _float_to_json(x: float | None) -> float | str | None:
 def _float_from_json(x: Any, where: str) -> float | None:
     if x is None:
         return None
-    if isinstance(x, str) and x in ("inf", "-inf", "nan"):
+    if isinstance(x, str) and x in _NON_FINITE:
         return float(x)
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         raise ValueError(f"{where} must be a number or null, not {x!r}")  # noqa: TRY004
     return float(x)
+
+
+def _location_to_obj(loc: Location | None) -> dict[str, Any] | None:
+    return None if loc is None else {"block": loc.block, "time_s": _float_to_json(loc.time_s)}
+
+
+def _location_from_obj(loc: Any) -> Location | None:
+    if loc is None:
+        return None
+    _check_keys(loc, ("block", "time_s"), "a location")
+    return Location(block=loc["block"], time_s=_float_from_json(loc["time_s"], '"time_s"'))
+
+
+def _finding_to_obj(f: Finding) -> dict[str, Any]:
+    return {
+        "code": f.code,
+        "message": f.message,
+        "location": _location_to_obj(f.location),
+        # An int stays an int, and a finite float stays a float.
+        "data": {k: _float_to_json(v) if isinstance(v, float) else v for k, v in f.data.items()},
+    }
+
+
+def _finding_from_obj(obj: Any) -> Finding:
+    _check_keys(obj, _FINDING_KEYS, "a finding")
+    data = obj["data"]
+    if not isinstance(data, dict):
+        raise ValueError('"data" of a finding must be a JSON object')  # noqa: TRY004
+    data = {k: float(v) if isinstance(v, str) and v in _NON_FINITE else v for k, v in data.items()}
+    try:
+        return Finding(
+            code=obj["code"],
+            message=obj["message"],
+            location=_location_from_obj(obj["location"]),
+            data=data,
+        )
+    except TypeError as exc:
+        # A value of a wrong type is a `ValueError` too: a caller of `from_json` catches one
+        # type for a bad text.
+        raise ValueError(f"a bad finding: {exc}") from exc
 
 
 def _result_to_obj(r: Result) -> dict[str, Any]:
@@ -190,25 +309,27 @@ def _result_to_obj(r: Result) -> dict[str, Any]:
         if name == "state":
             v = v.value
         elif name == "location":
-            v = None if v is None else {"block": v.block, "time_s": _float_to_json(v.time_s)}
+            v = _location_to_obj(v)
         elif name in _FLOAT_FIELDS:
             v = _float_to_json(v)
+        elif name == "findings":
+            v = [_finding_to_obj(f) for f in v]
         obj[name] = v
     return obj
 
 
-def _result_from_obj(obj: Any) -> Result:
-    _check_keys(obj, _RESULT_KEYS, "a result")
+def _result_from_obj(obj: Any, version: int) -> Result:
+    _check_keys(obj, _RESULT_KEYS if version >= 2 else _RESULT_KEYS_FORMAT_1, "a result")
     kwargs = dict(obj)
     kwargs["state"] = State(obj["state"])
     for name in _FLOAT_FIELDS:
         kwargs[name] = _float_from_json(obj[name], f'"{name}"')
-    loc = obj["location"]
-    if loc is not None:
-        _check_keys(loc, ("block", "time_s"), "a location")
-        kwargs["location"] = Location(
-            block=loc["block"], time_s=_float_from_json(loc["time_s"], '"time_s"')
-        )
+    kwargs["location"] = _location_from_obj(obj["location"])
+    if version >= 2:
+        kwargs["findings"] = tuple(_finding_from_obj(f) for f in _list(obj["findings"], "findings"))
+        omitted = obj["findings_omitted"]
+        if not isinstance(omitted, int) or isinstance(omitted, bool) or omitted < 0:
+            raise ValueError(f'"findings_omitted" must be an integer of 0 or more, not {omitted!r}')
     return Result(**kwargs)
 
 

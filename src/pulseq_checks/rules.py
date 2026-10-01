@@ -25,7 +25,9 @@ class CheckSpec:
     """The specification of a check (design section 5.4). `inputs` are the profile value
     paths that the check needs (`TargetProfile.sources` keys, for example "opts.max_grad"),
     and `models` the model names (for example "pns.safe"). A plugin check gives its own
-    `url`; a check of this package gives None."""
+    `url`; a check of this package gives None. For a check that gives findings, `findings`
+    says what one finding is, its codes, its location, the keys of `data`, and the order of
+    the findings (plan check-findings, section 4.3); None for a check that gives none."""
 
     id: str
     version: int
@@ -39,6 +41,7 @@ class CheckSpec:
     cost: str = "slow"
     pypulseq: str | None = None
     url: str | None = None
+    findings: str | None = None
 
 
 def spec_url(spec: CheckSpec) -> str:
@@ -103,7 +106,9 @@ class RunContext:
 class CheckRule(Protocol):
     """A check: its specification, and `run`, which returns its result for one target (made
     with `ctx.result`). The run function gives "not evaluated" before `run` when an input or
-    a model is missing, and "error" when `run` raises."""
+    a model is missing, and "error" when `run` raises or when the result is not valid: its
+    findings are not a tuple of `Finding`, or its `findings_omitted` is not an `int` of 0 or
+    more (plan check-findings, section 4.4)."""
 
     spec: CheckSpec
 

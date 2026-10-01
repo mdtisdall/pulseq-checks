@@ -81,6 +81,7 @@ def section(spec: CheckSpec) -> str:
         ("Tolerance", spec.tolerance),
         ("Pass condition", spec.pass_condition),
         ("pypulseq function", spec.pypulseq or "None"),
+        ("Findings", spec.findings or "None"),
     ]
     lines = [f"## `{spec.id}`", "", spec.title, ""]
     for label, text in fields:

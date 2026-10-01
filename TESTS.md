@@ -2671,8 +2671,10 @@ names the profile file and the `.asc` file.
 
 ### 2.9 Results (`test_results.py`)
 
-These tests cover `ResultMatrix`: its exit status (design section 5.6, R3) and its JSON form
-(decision 9 of the plan). They build the results directly, with no sequence.
+These tests cover `Finding` (plan check-findings, section 4.1), `ResultMatrix`: its exit status
+(design section 5.6, R3), its JSON form (decision 9 of the plan, and format 2 with the findings,
+plan check-findings, section 4.5) and `ResultMatrix.with_max_findings` (section 4.6). They build
+the results directly, with no sequence.
 
 #### `test_exit_status`
 
@@ -2692,16 +2694,23 @@ a state of the matrix.
 #### `test_json_round_trip`
 
 **Checks:** `ResultMatrix.from_json(m.to_json()) == m`, and the new matrix gives the same text
-again, for five matrices: one with every field set, one with `None` fields, one with two
-targets, one with `inf` and `-inf` in a value, a limit and a time, and one with a location
-whose block is `None`. The text is strict JSON (it has no `Infinity` or `NaN`).
+again, for seven matrices: one with every field set (also a finding with a location and data,
+and a `findings_omitted`), one with `None` fields, one with two targets, one with `inf` and
+`-inf` in a value, a limit and a time, one with a location whose block is `None`, one with
+findings (each type of `data` value: a string, an int, a float, a float with a whole value, the
+two bools and `None`; a finding with a location, one with no location and no data, and one with
+a location whose block is `None`; a result that is "pass" with a finding, and one that is
+"error" with no finding and a `findings_omitted`), and one with `inf` and `-inf` in the `data`
+of a finding next to a finite float and an int. The text is strict JSON (it has no `Infinity`
+or `NaN`).
 
 **How:** The test is parametrized over a function for each matrix. It writes the text, reads it
 back, and compares the matrices and the two texts. It parses the text again with a
 `parse_constant` function that fails the test on a non-finite constant.
 
 **Assumptions:** `nan` is not in the cases, because `nan != nan`: a matrix with `nan` is never
-equal to itself.
+equal to itself. `test_json_reads_nan_in_the_data_of_a_finding_as_a_float` covers `nan` in the
+`data` of a finding.
 
 #### `test_json_round_trip_keeps_floats_exactly`
 
@@ -2715,14 +2724,18 @@ back.
 
 #### `test_json_has_the_keys_of_decision_9`
 
-**Checks:** The JSON object has `"format": 1` and the keys of decision 9, in a fixed order:
+**Checks:** The JSON object has `"format": 2` and the keys of decision 9, in a fixed order:
 `format`, `package_version`, `sequence`, `targets`, `results`. A target has `name`, `sources`
 (an object), `unused_sections` (a list) and `limits_source`. A result has each `Result` field,
 with `state` as its value text (for example "not evaluated") and `location` as
-`{"block": ..., "time_s": ...}` or `null`.
+`{"block": ..., "time_s": ...}` or `null`, and the keys `findings` (a list) and
+`findings_omitted` (an integer) after `spec_url`. A finding is an object with the keys `code`,
+`message`, `location` and `data`, in this order. A result with no findings has `"findings": []`
+and `"findings_omitted": 0`.
 
 **How:** The test parses the text of a matrix with every field set, and compares the lists of
-keys and some values. It checks the state text and the `null` location on a second matrix.
+keys and some values, also those of its finding. It checks the state text, the `null` location,
+and the empty findings on a second matrix.
 
 **Assumptions:** None.
 
@@ -2736,10 +2749,66 @@ and the time of a location. Strict JSON has no such number.
 **Assumptions:** `to_json` writes `nan` as "nan" in the same way, and `from_json` reads it, but
 no test covers it.
 
+#### `test_json_writes_the_data_of_a_finding_with_its_types`
+
+**Checks:** The `data` of a finding keeps the type of each value in the text: a string, an int
+(written "7", not "7.0"), a float, a float with a whole value (written "2.0", not "2"), `true`,
+`false` and `null`. A finding with no location has `"location": null`, and a location whose
+block is `None` is written with `"block": null`. A finding with no data has `"data": {}`.
+
+**How:** The test parses the text of a matrix with these findings and compares the objects. It
+also looks for the text `"int": 7,` and `"whole float": 2.0,` in the written text, because
+Python compares `7 == 7.0`.
+
+**Assumptions:** None.
+
+#### `test_json_writes_a_float_in_the_data_of_a_finding_that_is_not_finite_as_a_string`
+
+**Checks:** `inf` and `-inf` in the `data` of a finding are written as the strings "inf" and
+"-inf", and a finite float and an int next to them stay numbers. `from_json` reads the two
+strings back as floats, and the int stays an `int`.
+
+**How:** The test parses the text of a matrix with these values and compares the `data` object.
+It reads the matrix back and checks the values and their types (`float` for the two infinities
+and `int` for the int).
+
+**Assumptions:** None.
+
+#### `test_json_reads_nan_in_the_data_of_a_finding_as_a_float`
+
+**Checks:** `nan` in the `data` of a finding is written as the string "nan", and `from_json`
+reads it back as a float that is not a number.
+
+**How:** The test writes a matrix with `nan` in a finding, checks the text, reads it back and
+tests the value with `math.isnan`.
+
+**Assumptions:** The test does not compare the matrices, because `nan != nan`.
+
+#### `test_from_json_reads_format_1_with_no_findings`
+
+**Checks:** A text of format 1, in which a result object has no `findings` and no
+`findings_omitted`, is read. The result has `findings == ()` and `findings_omitted == 0`, and
+its other fields are as in the text.
+
+**How:** The test makes the JSON object of a matrix, sets `format` to 1, deletes the two keys
+from each result, reads the text and checks the two fields and two other fields of the result.
+
+**Assumptions:** The test changes a text of format 2 to a text of format 1. It does not use a
+text that an old version wrote.
+
+#### `test_from_json_rejects_a_findings_key_in_format_1`
+
+**Checks:** A result object of format 1 with the key `findings` is refused as an unknown key.
+
+**How:** The test sets `format` to 1 in the JSON object of a matrix that has the findings keys,
+and matches `unknown key 'findings'`.
+
+**Assumptions:** None.
+
 #### `test_from_json_rejects_a_newer_format`
 
-**Checks:** `from_json` raises `ValueError` for a format above `FORMAT`, and the message names
-both versions (the format of the text and the format that the package reads).
+**Checks:** `from_json` raises `ValueError` for a format above `FORMAT` (format 3 now), and the
+message names both versions (the format of the text and the format that the package reads).
 
 **How:** The test changes `format` to `FORMAT + 1` in the JSON object of a matrix and matches
 the two numbers in the message.
@@ -2768,9 +2837,10 @@ and expects `ValueError`.
 #### `test_from_json_rejects_an_unknown_key`
 
 **Checks:** An unknown key is a `ValueError` that names the key, in the matrix, in a target, in
-a result and in a location (the same rule as the unknown keys of a profile).
+a result, in a location, in a finding and in the location of a finding (the same rule as the
+unknown keys of a profile).
 
-**How:** The test is parametrized over the four places. It adds a key `extra` there and matches
+**How:** The test is parametrized over the six places. It adds a key `extra` there and matches
 the name in the message.
 
 **Assumptions:** None.
@@ -2778,12 +2848,152 @@ the name in the message.
 #### `test_from_json_rejects_a_missing_key`
 
 **Checks:** A missing key is a `ValueError` that names the key, in the matrix, in a target, in
-a result and in a location.
+a result, in a location, and in a result of format 2 (`findings`, `findings_omitted`), in a
+finding (`message`, `data`) and in the location of a finding (`block`).
 
-**How:** The test is parametrized over the four places. It deletes one key there (`sequence`,
-`sources`, `required`, `time_s`) and matches the name in the message.
+**How:** The test is parametrized over the nine places. It deletes one key there (`sequence`,
+`sources`, `required`, `time_s`, `findings`, `findings_omitted`, `message`, `data`, `block`)
+and matches the name in the message.
 
 **Assumptions:** None.
+
+#### `test_from_json_rejects_a_bad_finding`
+
+**Checks:** A finding of the wrong type in the JSON text is a `ValueError` (not a `TypeError`):
+`findings` that is an object or `null`; a finding that is a string; a `code` that is an integer
+or empty; a `message` that is `null`; `data` that is a list; a data value that is a list or an
+object; a `location` that is an integer; a location time that is a string other than "inf",
+"-inf" or "nan".
+
+**How:** The test is parametrized over eleven cases. It sets the value in the JSON object of a
+matrix with a finding and expects `ValueError`.
+
+**Assumptions:** A caller of `from_json` catches one type for a bad text, as for the other
+objects.
+
+#### `test_from_json_rejects_a_findings_omitted_that_is_not_an_integer_of_0_or_more`
+
+**Checks:** `findings_omitted` that is a string, a float (also one with a whole value), a bool,
+a negative integer, `null` or a list is a `ValueError` that names the key.
+
+**How:** The test is parametrized over these values. It sets each one in the JSON object of a
+matrix and matches the name in the message.
+
+**Assumptions:** A bool is not an integer for this check, as for `format`.
+
+#### `test_from_json_keeps_a_data_string_that_is_not_a_non_finite_float`
+
+**Checks:** A string in the `data` of a finding that is not "inf", "-inf" or "nan" (here
+"infinity") stays a string.
+
+**How:** The test sets this string as a data value in the JSON object of a matrix, reads the
+text and compares the value.
+
+**Assumptions:** None.
+
+#### `test_finding_rejects_a_bad_value`
+
+**Checks:** `Finding.__post_init__` refuses each of these: a `code` that is not a string
+(`TypeError`) or is empty (`ValueError`); a `message` that is not a string; a `location` that is
+not a `Location` or `None` (a tuple, an integer); `data` that is not a mapping; a key of `data`
+that is not a string; a value of `data` that is a list, a dict or bytes (`TypeError`); and a
+string value of `data` that is "inf", "-inf" or "nan" (`ValueError`).
+
+**How:** The test is parametrized over fifteen cases. Each gives the arguments of `Finding` and
+the type of the error that it expects.
+
+**Assumptions:** The plan does not list the check that `data` is a mapping. The code makes it,
+because `data.items()` needs one.
+
+#### `test_finding_accepts_each_type_of_data_value`
+
+**Checks:** A `Finding` accepts a string, an int, a float, `inf`, `nan`, a bool and `None` as
+data values, also the string "Inf" (which is not one of the three refused strings). The
+default `data` is an empty mapping and the default `location` is `None`.
+
+**How:** The test makes one `Finding` with these values and a location, and checks the bool
+value, the default `data` and the default `location` of a second one.
+
+**Assumptions:** None.
+
+#### `test_a_result_has_no_findings_by_default`
+
+**Checks:** A `Result` made with no findings arguments has `findings == ()` and
+`findings_omitted == 0`.
+
+**How:** The test makes a `Result` and compares the two fields.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_zero_keeps_none_and_counts_all`
+
+**Checks:** `with_max_findings(0)` keeps no finding in any result, and adds the number of
+findings that it removed to `findings_omitted`: 3 findings with 2 omitted before give 5, and a
+result with no findings keeps its 2.
+
+**How:** The test makes a matrix of two results with 3 and 0 findings and a `findings_omitted`
+of 2, calls the method and compares the two fields of each result.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_below_the_count_keeps_the_first_ones`
+
+**Checks:** For a result with 5 findings, `with_max_findings(2)` keeps the first two (in their
+order), and `findings_omitted` is 3. The other fields of the result and the targets are the
+same, and the matrix that the method was called on does not change.
+
+**How:** The test calls the method and compares the codes of the kept findings, the count, the
+`check_id`, the targets and the fields of the original matrix.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_at_or_above_the_count_changes_nothing`
+
+**Checks:** When `n` is equal to the largest number of findings of a result, or larger, the new
+matrix is equal to the old one, with the existing `findings_omitted` (7) unchanged.
+
+**How:** The test is parametrized over `n` of 3, 4 and 100, on a matrix with results of 3 and 1
+findings. It compares the matrices with `==`.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_adds_to_an_existing_findings_omitted`
+
+**Checks:** The number of removed findings is added to the `findings_omitted` that the result
+had: 4 findings with 10 omitted and `n` of 1 give 13. A second call with 0 gives 14.
+
+**How:** The test calls the method and compares the counts.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_limits_each_result_separately`
+
+**Checks:** In a matrix with results of 1, 3 and 5 findings, `with_max_findings(2)` keeps 1, 2
+and 2 findings, and `findings_omitted` is 0, 1 and 3.
+
+**How:** The test calls the method and compares the two lists.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_survives_a_json_round_trip`
+
+**Checks:** The matrix that `with_max_findings` gives is equal to its own read-back from the
+JSON text, so the removed findings stay visible in `findings_omitted`.
+
+**How:** The test limits the matrix with findings to 1, writes the text, reads it back and
+compares the matrices.
+
+**Assumptions:** None.
+
+#### `test_with_max_findings_rejects_a_bad_n`
+
+**Checks:** `with_max_findings` raises `ValueError` for a negative integer, a bool, a float
+(also one with a whole value), a string and `None`. The message names the maximum number of
+findings.
+
+**How:** The test is parametrized over these values and matches the message.
+
+**Assumptions:** A bool is not an integer for this check, as for `format`.
 
 ### 2.10 The run function (`test_run.py`)
 
@@ -2872,6 +3082,34 @@ documentation URL with the ID `t.a.b` without its dots.
 
 **Assumptions:** The test repeats the rule for the link (`DOCS_URL` and the ID without dots)
 and does not check that the heading exists in `docs/checks.md`.
+
+#### `test_the_findings_of_a_rule_arrive_in_the_matrix_unchanged`
+
+**Checks:** The findings and the `findings_omitted` that a rule gives are in the result of
+the matrix without a change, with and without `findings_omitted`, and the run function still
+sets `required`.
+
+**How:** The test makes two rules, one with two findings and a `findings_omitted` of 3 and
+one with the same findings and no `findings_omitted`. It runs both, with the first one
+required for all targets. It checks the state, the findings, `findings_omitted` (3, and the
+default 0) and `required` of each result.
+
+**Assumptions:** The findings are valid `Finding` objects, one with a location and data and
+one without.
+
+#### `test_findings_that_are_not_valid_give_error`
+
+**Checks:** When a rule gives findings as a list, a finding that is not a `Finding` (a
+string, also an empty string), or a `findings_omitted` of -1, of True or of 1.5, the state
+is "error", the reason names the problem, and the result has no findings of the rule.
+
+**How:** One parametrized test. For each case, a rule makes its result with `ctx.result` and
+the bad field. The test checks that the state is "error", that the reason has the word that
+names the problem ("findings", "str" or "findings_omitted"), and that `findings` is empty and
+`findings_omitted` is 0.
+
+**Assumptions:** `Result` does not check its own fields, so a rule can make a result with a
+bad field. The test does not check the complete text of the reason.
 
 #### `test_spec_url_is_the_url_of_the_spec_or_the_heading_of_its_id`
 
@@ -4166,7 +4404,9 @@ state of each result is controlled. They write small profile files, config files
 synthetic spin-echo `.seq` file (`tests/synthetic.py`) in `tmp_path`. A test rule gives the
 value 1.5 and the limit 2 with the unit mT/m, and, for "not evaluated" and "error", a
 reason. A test rule with an input that the profile does not give ends as "not evaluated"
-before it runs. `run_to_matrix` runs `main` with `--json` and `--quiet`, and reads the
+before it runs. A test rule can also give findings (`FINDINGS` in `test_cli.py`: one with a
+block and a time, one with a time only and a message of two lines, and one with no
+location). `run_to_matrix` runs `main` with `--json` and `--quiet`, and reads the
 file back with `ResultMatrix.from_json`, to see which checks ran and which are required.
 
 #### `test_the_exit_status_follows_the_states_of_the_results`
@@ -4482,6 +4722,130 @@ the last line.
 **Assumptions:** The test does not check the numbers or the states of the checks. The
 status can be 0 or 2, because the timing of the synthetic sequence depends on the profile
 that the test uses.
+
+#### `test_the_summary_has_a_count_line_for_each_result_with_findings_and_no_finding_line`
+
+**Checks:** By default, the summary has a findings part after the results and before the
+exit status, with the header "findings (each one is in the JSON result; --show-findings
+lists them here):" and one count line for each result with findings ("t.f, target a: 3
+findings"). A result without findings has no line, and the code of no finding is in the
+output. The status is 0.
+
+**How:** One test rule gives no findings and one gives the three findings of `FINDINGS`.
+The test splits the output at the blank lines and compares the first line of each block, the
+lines of the findings block, and checks that no finding code is in the output.
+
+**Assumptions:** The test depends on the layout of the summary: blocks that blank lines
+separate. The findings pass through `ctx.result` as a field of the result (`test_run.py`).
+
+#### `test_a_result_with_one_finding_says_1_finding`
+
+**Checks:** The count line of a result with one finding says "1 finding", not "1 findings".
+
+**How:** A test rule gives the first finding of `FINDINGS`. The test compares the lines of
+the findings block after the header.
+
+**Assumptions:** None.
+
+#### `test_show_findings_lists_each_finding_after_the_line_of_its_result`
+
+**Checks:** With `--show-findings`, the header is "findings:", and each kept finding is
+below the count line of its result, in the order of the results (the targets in the order of
+the command, then the check IDs), indented by 4 spaces. A finding with a block is written
+"block 1 at 0 s: CODE: message", one with a time and no block "at 0.5 s: CODE: message", and
+one with no location "CODE: message". The second line of a message has 6 spaces. The
+findings part is between the results and the exit status line.
+
+**How:** Two test rules (three findings, and one finding) run for two targets. The test
+compares all the lines of the findings block with the expected lines, and the first lines of
+the last two blocks.
+
+**Assumptions:** The format of the time is `:.6g`; the values 0 and 0.5 do not test other
+values.
+
+#### `test_json_to_a_file_has_all_the_findings_and_the_console_has_no_finding_line`
+
+**Checks:** With `--json FILE` and no limit, the file has all the findings of each result,
+in order, with `findings_omitted` 0, and the console output has the count line and no
+finding code.
+
+**How:** The test runs `main`, reads the file with `ResultMatrix.from_json`, and compares the
+findings and the omitted number of each result. It compares the findings block of the
+console output and checks that no finding code is in it.
+
+**Assumptions:** The round trip of a finding through JSON is in `test_results.py`.
+
+#### `test_json_to_stdout_with_findings_is_only_the_json_and_the_findings_do_not_go_to_stderr`
+
+**Checks:** With `--json -`, the standard output is only the JSON result, with all the
+findings, and the standard error has the summary as before: the count line and no finding
+line. With `--quiet`, the standard error is empty.
+
+**How:** The test reads stdout with `ResultMatrix.from_json`, which refuses any other text,
+and compares the findings. It compares the findings block of stderr, checks that no finding
+code is in it, and runs again with `--quiet`.
+
+**Assumptions:** None.
+
+#### `test_max_findings_limits_the_json_and_the_summary_and_records_the_omitted_number`
+
+**Checks:** With `--max-findings 1` and with `--max-findings 0` (parametrized), the JSON
+result keeps the first N findings of the result with three, and has `findings_omitted` 3
+minus N. The result without findings does not change. The summary count line says "3
+findings (N kept, 3-N omitted)", and with `--show-findings` it lists only the kept findings.
+
+**How:** The test runs `main` with `--json FILE` and `--show-findings`, reads the file back,
+and compares the findings and the omitted number of each result. It compares the first two
+lines of the findings block, the number of its lines, and the start of the first finding line
+when one is kept.
+
+**Assumptions:** The logic of the truncation is `ResultMatrix.with_max_findings`
+(`test_results.py`). This test shows only that the command applies it before the JSON result
+and the summary.
+
+#### `test_max_findings_at_or_above_the_count_changes_nothing`
+
+**Checks:** With `--max-findings 3` for a result with three findings, the JSON result has
+all the findings and `findings_omitted` 0, and the count line has no "kept" or "omitted".
+
+**How:** The test runs `main` with `--json FILE`, reads it back, and compares the result and
+the lines of the findings block.
+
+**Assumptions:** None.
+
+#### `test_max_findings_that_is_not_an_integer_of_0_or_more_gives_status_1`
+
+**Checks:** `--max-findings` with "-1", "x" or "1.5" gives status 1, nothing on stdout, and
+a message on stderr that has `pulseq-check: error:` and names the option.
+
+**How:** A parametrized test runs `main` with each value and a valid sequence and profile.
+
+**Assumptions:** The message of argparse for the value comes from `ArgumentTypeError`; the
+test does not check its wording.
+
+#### `test_the_findings_do_not_change_the_status`
+
+**Checks:** A failing result with findings gives status 2 with `--show-findings`, and the
+last line of the summary is "exit status 2: a check failed", the same as without findings.
+
+**How:** The test runs `main` with a failing test rule that gives findings, checks the status
+and the last line, and then runs a failing test rule without findings and checks the status.
+
+**Assumptions:** The status of a passing result with findings is checked by the count-line
+test (status 0).
+
+#### `test_a_run_without_findings_has_no_findings_part_and_the_flags_change_nothing`
+
+**Checks:** When no result has findings, the summary has no findings part: the blocks are the
+sequence, the results and the exit status. `--show-findings` and `--max-findings 0` give
+exactly the same output.
+
+**How:** One passing and one failing test rule run two times: with no flag, and with both
+flags. The test compares the first line of each block of the first output, that it has no
+findings block, and the whole of the second output with the first.
+
+**Assumptions:** The test does not compare the summary with a text from before the change;
+the other summary tests of this file did not change and pass.
 
 #### `test_the_console_script_is_the_main_function_of_the_cli`
 
