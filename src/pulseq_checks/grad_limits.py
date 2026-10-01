@@ -18,8 +18,11 @@ section 4.6). It reads individual blocks only for the few blocks that a window e
 
 The peak slew rate is the largest of two kinds of value (decision 6 of section 2.5 of the
 plan): the slope of each straight segment of each gradient event, and the step at each block
-junction divided by `grad_raster_time` (`Sequence.add_block` checks this step). The step uses
-0 for a block with no event on the axis, and 0 before the first block.
+junction divided by the gradient raster of the sequence, `seq.grad_raster_time` (the
+`GradientRasterTime` that the file declares), not the raster of `seq.system`. The segment slopes
+use the times of the file, and `Sequence.add_block` checked this step against the raster that
+built the file. The step uses 0 for a block with no event on the axis, and 0 before the first
+block.
 """
 
 import math
@@ -570,7 +573,7 @@ def gradient_limits(
     index = sequence_index(seq)
     ev = _event_values(seq, index)
     total_duration = index.end_s
-    grad_raster = seq.system.grad_raster_time
+    grad_raster = seq.grad_raster_time
 
     if window is None:
         range_s = (0.0, total_duration)

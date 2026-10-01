@@ -185,11 +185,14 @@ class _SlewAxis(_GradientCheck):
             "the time between them (a segment shorter than 1 ns is not used). "
             + _SEGMENTS
             + " (b) The step at each block junction divided by the gradient raster time of the "
-            "sequence: the absolute difference between the last amplitude of the gradient of "
-            "the previous block and the first amplitude of the gradient of this block. A "
+            "sequence (the GradientRasterTime that the file declares): the absolute difference "
+            "between the last amplitude of the gradient of the previous block and the first "
+            "amplitude of the gradient of this block. A "
             "block with no gradient on the axis counts as 0, and so does the value before the "
             "first block. Part (b) finds the step where a gradient does not start or end at "
-            "0, as with an extended trapezoid; pypulseq limits this step in add_block. The "
+            "0, as with an extended trapezoid; pypulseq limits this step in add_block. A "
+            "difference between the raster of the file and the raster of the target is the "
+            "subject of timing.rasters. The "
             "return to 0 after the last block is not a junction and is not counted. The slew "
             "is converted from Hz/m/s to T/m/s with gamma = 42.576 MHz/T. "
             + _WHOLE_FILE
