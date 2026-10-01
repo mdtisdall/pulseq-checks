@@ -630,7 +630,7 @@ A frozen dataclass:
 | `exit_status()` | 0, 2 or 1, by the [table above](#exit-status). |
 | `with_max_findings(n)` | A new matrix in which each result with more than `n` findings keeps the first `n`, and its `findings_omitted` has the number of the others added. `n` must be an `int` of 0 or more (not a `bool`), else `ValueError`. |
 | `to_json()` | The [JSON](#6-the-result-json) text. |
-| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Reads format 1 and format 2. Raises `ValueError` for a format that is newer than this package, and for an unknown or a missing key. |
+| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Raises `ValueError` for a format that is newer than this package, and for an unknown or a missing key. |
 
 ### `Result`
 
@@ -707,7 +707,7 @@ The command catches `CheckRunError` and gives exit status 1.
 
 | Key | Meaning |
 |---|---|
-| `format` | `2`. `from_json` reads `1` and `2`. A result of format 1 has no `findings` and no `findings_omitted`, and `from_json` gives it no findings. `from_json` refuses a larger number. A reader of `0.1.0rc1` refuses format 2. |
+| `format` | `1`. `from_json` refuses a larger number. In the release candidates the format stays 1 when the JSON changes: a reader of `0.1.0rc1` refuses a result of this version, because of the unknown key `findings`. |
 | `package_version` | The version of `pulseq-checks`. |
 | `sequence` | The path of the `.seq` file, or `"<Sequence object>"`. |
 | `targets` | One object for each target: `name`, `sources` (each value path, with `"profile"` or the `.asc` file as its source), `unused_sections` and `limits_source`. |
@@ -726,7 +726,7 @@ named as required:
 
 ```json
 {
-  "format": 2,
+  "format": 1,
   "package_version": "0.1.0.dev0",
   "sequence": "scan.seq",
   "targets": [

@@ -224,7 +224,7 @@ def test_json_round_trip_keeps_floats_exactly():
 def test_json_has_the_keys_of_decision_9():
     obj = json.loads(_full_matrix().to_json())
     assert list(obj) == ["format", "package_version", "sequence", "targets", "results"]
-    assert obj["format"] == 2 == FORMAT
+    assert obj["format"] == 1 == FORMAT
     assert list(obj["targets"][0]) == ["name", "sources", "unused_sections", "limits_source"]
     assert obj["targets"][0]["sources"]["models.pns.safe"] == "MP_GPA.asc (fast)"
     assert obj["targets"][0]["unused_sections"] == ["models.pns.other"]
@@ -306,26 +306,6 @@ def test_json_reads_nan_in_the_data_of_a_finding_as_a_float():
     value = ResultMatrix.from_json(text).results[0].findings[0].data["x"]
     assert isinstance(value, float)
     assert math.isnan(value)
-
-
-def test_from_json_reads_format_1_with_no_findings():
-    obj = json.loads(_full_matrix().to_json())
-    obj["format"] = 1
-    for result in obj["results"]:
-        del result["findings"]
-        del result["findings_omitted"]
-    back = ResultMatrix.from_json(json.dumps(obj))
-    assert back.results[0].findings == ()
-    assert back.results[0].findings_omitted == 0
-    assert back.results[0].check_id == "pns.safe"
-    assert back.results[0].value == 103.25
-
-
-def test_from_json_rejects_a_findings_key_in_format_1():
-    obj = json.loads(_full_matrix().to_json())
-    obj["format"] = 1
-    with pytest.raises(ValueError, match="unknown key 'findings'"):
-        ResultMatrix.from_json(json.dumps(obj))
 
 
 def test_from_json_rejects_a_newer_format():

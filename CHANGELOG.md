@@ -28,9 +28,11 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 
 ### Changed
 
-- **The JSON result is format 2.** Each result has the keys `findings` and
-  `findings_omitted`. A reader of `0.1.0rc1` refuses format 2. `from_json` of
-  this version still reads format 1: a result of format 1 has no findings.
+- **The JSON result** has in each result the keys `findings` and
+  `findings_omitted`. The format stays 1 in the release candidates. A reader
+  of `0.1.0rc1` refuses a result of this version (the unknown key
+  `findings`), and `from_json` of this version refuses a result of
+  `0.1.0rc1` (the missing key `findings`).
 - **The run function gives "error"** for a result whose `findings` is not a
   tuple of `Finding`, or whose `findings_omitted` is not an `int` of 0 or more.
 - A profile that gives both `opts.max_slew` and `opts.rise_time` (from the

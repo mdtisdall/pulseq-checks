@@ -17,9 +17,9 @@ from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from typing import Any
 
-# The version of the JSON form of a `ResultMatrix` (the "format" key). `from_json` reads this
-# format and format 1, which has no findings.
-FORMAT = 2
+# The version of the JSON form of a `ResultMatrix` (the "format" key). It stays 1 in the
+# release candidates: the findings keys of check-findings section 4.5 are part of format 1.
+FORMAT = 1
 
 
 class CheckRunError(Exception):
@@ -199,8 +199,7 @@ class ResultMatrix:
     def from_json(cls, text: str) -> ResultMatrix:
         """The matrix of `to_json`: `from_json(m.to_json()) == m`. A format above `FORMAT`
         is a `ValueError` that names both versions. An unknown key or a missing key in any
-        object is a `ValueError` that names it. A result object of format 1 has no findings
-        keys: its result has no findings."""
+        object is a `ValueError` that names it."""
         # A value of a wrong type is a `ValueError` too (hence the `noqa: TRY004`): a caller
         # of `from_json` catches one type for a bad text.
         obj = json.loads(text)
@@ -232,7 +231,7 @@ class ResultMatrix:
             sequence=obj["sequence"],
             package_version=obj["package_version"],
             targets=tuple(targets),
-            results=tuple(_result_from_obj(r, version) for r in _list(obj["results"], "results")),
+            results=tuple(_result_from_obj(r) for r in _list(obj["results"], "results")),
         )
 
 
@@ -241,9 +240,6 @@ class ResultMatrix:
 _FLOAT_FIELDS = ("value", "limit")
 _RESULT_KEYS = tuple(f.name for f in fields(Result))
 _FINDING_KEYS = tuple(f.name for f in fields(Finding))
-# The result keys that format 1 does not have.
-_FINDINGS_KEYS = ("findings", "findings_omitted")
-_RESULT_KEYS_FORMAT_1 = tuple(k for k in _RESULT_KEYS if k not in _FINDINGS_KEYS)
 
 
 def _float_to_json(x: float | None) -> float | str | None:
@@ -318,18 +314,17 @@ def _result_to_obj(r: Result) -> dict[str, Any]:
     return obj
 
 
-def _result_from_obj(obj: Any, version: int) -> Result:
-    _check_keys(obj, _RESULT_KEYS if version >= 2 else _RESULT_KEYS_FORMAT_1, "a result")
+def _result_from_obj(obj: Any) -> Result:
+    _check_keys(obj, _RESULT_KEYS, "a result")
     kwargs = dict(obj)
     kwargs["state"] = State(obj["state"])
     for name in _FLOAT_FIELDS:
         kwargs[name] = _float_from_json(obj[name], f'"{name}"')
     kwargs["location"] = _location_from_obj(obj["location"])
-    if version >= 2:
-        kwargs["findings"] = tuple(_finding_from_obj(f) for f in _list(obj["findings"], "findings"))
-        omitted = obj["findings_omitted"]
-        if not isinstance(omitted, int) or isinstance(omitted, bool) or omitted < 0:
-            raise ValueError(f'"findings_omitted" must be an integer of 0 or more, not {omitted!r}')
+    kwargs["findings"] = tuple(_finding_from_obj(f) for f in _list(obj["findings"], "findings"))
+    omitted = obj["findings_omitted"]
+    if not isinstance(omitted, int) or isinstance(omitted, bool) or omitted < 0:
+        raise ValueError(f'"findings_omitted" must be an integer of 0 or more, not {omitted!r}')
     return Result(**kwargs)
 
 
