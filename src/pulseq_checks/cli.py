@@ -2,7 +2,13 @@
 checks on a `.seq` file for one or more target profiles, writes the summary for a person and
 the JSON result, and gives the exit status of `ResultMatrix.exit_status` (0, 2 or 1). An
 error of the run, and an error in the arguments, give status 1, not 2: status 2 means that a
-check failed."""
+check failed.
+
+The findings of the results (plan check-findings, section 4.7) are in the JSON result. The
+summary has one count line for each result with findings, and `--show-findings` lists the
+findings that the matrix keeps. `--max-findings` limits the findings of each result before
+the JSON result and the summary are written. The findings do not change the streams or the
+exit status."""
 
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from typing import NoReturn
 
 from .config import read_check_config
 from .profile import read_profile
-from .results import CheckRunError, Result, ResultMatrix, State
+from .results import CheckRunError, Finding, Result, ResultMatrix, State
 from .run import run_checks
 
 PROG = "pulseq-check"
@@ -34,6 +40,17 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         self.exit(1, f"{self.prog}: error: {message}\n")
+
+
+def _max_findings(text: str) -> int:
+    """The value of `--max-findings`: an integer of 0 or more."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer of 0 or more") from None
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer of 0 or more")
+    return n
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -80,6 +97,20 @@ def _make_parser() -> argparse.ArgumentParser:
         help="write the result as JSON to the file OUT; '-' is the standard output, and then "
         "the summary goes to the standard error",
     )
+    parser.add_argument(
+        "--max-findings",
+        metavar="N",
+        type=_max_findings,
+        help="limit the findings that each result keeps in the JSON result and the summary "
+        "to the first N (an integer of 0 or more); the result records the number omitted. "
+        "Without it, all the findings are kept",
+    )
+    parser.add_argument(
+        "--show-findings",
+        action="store_true",
+        help="list in the summary each finding that the result keeps; without it, the summary "
+        "has a count for each result with findings",
+    )
     parser.add_argument("--quiet", action="store_true", help="do not write the summary")
     return parser
 
@@ -94,6 +125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return e.code
     try:
         matrix = _run(args)
+        if args.max_findings is not None:
+            matrix = matrix.with_max_findings(args.max_findings)
         summary_stream = sys.stderr if args.json == "-" else sys.stdout
         if args.json == "-":
             sys.stdout.write(matrix.to_json() + "\n")
@@ -104,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     status = matrix.exit_status()
     if not args.quiet:
-        summary_stream.write(summary(matrix))
+        summary_stream.write(summary(matrix, show_findings=args.show_findings))
     return status
 
 
@@ -143,10 +176,12 @@ def _write_json(matrix: ResultMatrix, path: str) -> None:
         raise CheckRunError(f"cannot write the JSON result to {path!r}: {e}") from e
 
 
-def summary(matrix: ResultMatrix) -> str:
+def summary(matrix: ResultMatrix, *, show_findings: bool = False) -> str:
     """The summary for a person (plan section 4.8), in plain text with aligned columns:
     one line for each check and target, then the "not evaluated" and "error" results with
-    their reasons, then the unused profile sections of each target, then the meaning of
+    their reasons, then the findings (only when a result has findings: one count line for
+    each result with findings, and with `show_findings` one line for each finding that the
+    matrix keeps), then the unused profile sections of each target, then the meaning of
     the exit status. The lines of a check are in the order of `matrix.results`."""
     lines = [f"sequence: {matrix.sequence}", ""]
 
@@ -178,6 +213,20 @@ def summary(matrix: ResultMatrix) -> str:
             lines.append(f"  {r.state.value}: {r.check_id}, target {r.target}{required}")
             lines += [f"    {line}" for line in (r.reason or "no reason given").splitlines()]
 
+    with_findings = [r for r in matrix.results if r.findings or r.findings_omitted]
+    if with_findings:
+        lines += [
+            "",
+            "findings:"
+            if show_findings
+            else "findings (each one is in the JSON result; --show-findings lists them here):",
+        ]
+        for r in with_findings:
+            lines.append(f"  {r.check_id}, target {r.target}: {_findings_count_text(r)}")
+            if show_findings:
+                for finding in r.findings:
+                    lines += _finding_lines(finding)
+
     unused = [(t.name, t.unused_sections) for t in matrix.targets if t.unused_sections]
     if unused:
         lines += ["", "unused profile sections (no check used them):"]
@@ -189,6 +238,31 @@ def summary(matrix: ResultMatrix) -> str:
         meaning += ", and a check failed"
     lines += ["", f"exit status {status}: {meaning}"]
     return "\n".join(lines) + "\n"
+
+
+def _findings_count_text(result: Result) -> str:
+    """For example "4 findings", or "4000 findings (1000 kept, 3000 omitted)" when
+    `ResultMatrix.with_max_findings` removed some."""
+    total = len(result.findings) + result.findings_omitted
+    text = f"{total} finding" if total == 1 else f"{total} findings"
+    if result.findings_omitted:
+        text += f" ({len(result.findings)} kept, {result.findings_omitted} omitted)"
+    return text
+
+
+def _finding_lines(finding: Finding) -> list[str]:
+    """The lines of one finding: "block 1 at 0 s: CODE: message", "at 0.5 s: CODE: message" for
+    a location without a block, or "CODE: message" without a location. A message of more
+    than one line has its other lines indented 2 spaces more."""
+    location = finding.location
+    if location is None:
+        prefix = ""
+    elif location.block is None:
+        prefix = f"at {location.time_s:.6g} s: "
+    else:
+        prefix = f"block {location.block} at {location.time_s:.6g} s: "
+    first, *rest = finding.message.splitlines() or [""]
+    return [f"    {prefix}{finding.code}: {first}".rstrip(), *(f"      {line}" for line in rest)]
 
 
 def _value_text(result: Result) -> str:

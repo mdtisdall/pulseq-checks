@@ -3,8 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved (2026-09-30). The user approved the recommended answers of
-section 5. Phase 1 has not started.
+Status: phase 1 done, phase 2 not started (2026-09-30). The user approved
+the recommended answers of section 5. Section 9 records the changes to this
+plan during the work.
 
 ## 1. Goal
 
@@ -148,9 +149,9 @@ findings do not change the state, and they do not change the exit status.
 
 ### 4.3 `CheckSpec.findings` (`rules.py`)
 
-A new field `findings: str | None = None`, after `pypulseq`. For a check that
-gives findings, it says: what one finding is, its codes, its location, the
-keys of `data`, and the order. `scripts/check_docs.py` adds the row
+A new field `findings: str | None = None`, the last field (after `url`;
+section 9.1). For a check that gives findings, it says: what one finding is,
+its codes, its location, the keys of `data`, and the order. `scripts/check_docs.py` adds the row
 "Findings" to the table of each check in `docs/checks.md` (`spec.findings`,
 or "None"). A plugin check documents its findings in the same field.
 
@@ -408,4 +409,12 @@ decision about its specification version:
 
 ## 9. Results
 
-Empty until phase 2.
+### 9.1 Changes to this plan during the work
+
+- **Phase 1.** `CheckSpec.findings` is the last field of `CheckSpec`, after
+  `url`, not after `pypulseq` (section 4.3). A plugin that gives the earlier
+  fields by position keeps working.
+
+### 9.2 Measurements
+
+Empty until phase 2 (task 2.2).

@@ -9,7 +9,7 @@ from pulseq_checks import registry
 from pulseq_checks.grad_limits import HardwareLimits
 from pulseq_checks.profile import TargetProfile
 from pulseq_checks.registry import RegistryError
-from pulseq_checks.results import Location, Result, State
+from pulseq_checks.results import Finding, Location, Result, State
 from pulseq_checks.rules import DOCS_URL, CheckSpec, RunContext, spec_url
 from pulseq_checks.run import RunError, run_checks
 
@@ -169,6 +169,55 @@ def test_a_result_of_a_rule_keeps_its_fields_and_gets_the_spec_link(monkeypatch)
         required=False,
         spec_url=DOCS_URL + "#tab",
     )
+
+
+def test_the_findings_of_a_rule_arrive_in_the_matrix_unchanged(monkeypatch):
+    findings = (
+        Finding("T_ONE", "the first", Location(block=2, time_s=0.1), {"x": 1.5}),
+        Finding("T_TWO", "the second"),
+    )
+    with_omitted = Rule(
+        make_spec("t.a"),
+        lambda ctx: ctx.result(
+            with_omitted.spec, State.FAIL, findings=findings, findings_omitted=3
+        ),
+    )
+    without_omitted = Rule(
+        make_spec("t.b"),
+        lambda ctx: ctx.result(without_omitted.spec, State.PASS, findings=findings),
+    )
+    install(monkeypatch, with_omitted, without_omitted)
+    results = by_key(run_checks(spin_echo_sequence(), [make_profile()], required={"t.a": None}))
+    assert results["t.a", "a"].state is State.FAIL
+    assert results["t.a", "a"].findings == findings
+    assert results["t.a", "a"].findings_omitted == 3
+    assert results["t.a", "a"].required is True
+    assert results["t.b", "a"].state is State.PASS
+    assert results["t.b", "a"].findings == findings
+    assert results["t.b", "a"].findings_omitted == 0
+    assert results["t.b", "a"].required is False
+
+
+@pytest.mark.parametrize(
+    ("fields", "text"),
+    [
+        ({"findings": [Finding("T", "m")]}, "findings"),
+        ({"findings": (Finding("T", "m"), "not a finding")}, "str"),
+        ({"findings": ("",)}, "str"),
+        ({"findings_omitted": -1}, "findings_omitted"),
+        ({"findings_omitted": True}, "findings_omitted"),
+        ({"findings_omitted": 1.5}, "findings_omitted"),
+    ],
+    ids=["list", "not a Finding", "falsy not a Finding", "negative", "bool", "float"],
+)
+def test_findings_that_are_not_valid_give_error(monkeypatch, fields, text):
+    rule = Rule(make_spec("t.a"), lambda ctx: ctx.result(rule.spec, State.PASS, **fields))
+    install(monkeypatch, rule)
+    (result,) = run_checks(spin_echo_sequence(), [make_profile()]).results
+    assert result.state is State.ERROR
+    assert text in result.reason
+    assert result.findings == ()
+    assert result.findings_omitted == 0
 
 
 def test_spec_url_is_the_url_of_the_spec_or_the_heading_of_its_id():

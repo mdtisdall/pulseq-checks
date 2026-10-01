@@ -3,6 +3,37 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
+## Unreleased
+
+### Added
+
+- **Findings**: a check can report each problem that it found, not only the
+  worst value. `Finding` (`code`, `message`, `location`, `data`) is exported
+  from `pulseq_checks`. `Result.findings` is a tuple of `Finding`, and
+  `Result.findings_omitted` is the number of findings that were removed. A
+  finding does not change the state of its result.
+- **`CheckSpec.findings`**: the text in which a check documents its findings
+  (what one finding is, its codes, its location, the keys of `data` and the
+  order). It is the last field of `CheckSpec`, so that a plugin that gives the
+  earlier fields by position keeps working.
+- **`ResultMatrix.with_max_findings(n)`**: a new matrix in which each result
+  keeps at most `n` findings, and `findings_omitted` has the number of the
+  others.
+- **`--max-findings N` and `--show-findings`** of `pulseq-check`. The command
+  writes all findings to the JSON result, unless `--max-findings` limits them.
+  `--show-findings` lists the kept findings in the summary.
+- **The findings part of the summary**: when a result has findings, the summary
+  has one count line for each of them. The part comes after "not evaluated and
+  errors" and before the unused profile sections.
+
+### Changed
+
+- **The JSON result is format 2.** Each result has the keys `findings` and
+  `findings_omitted`. A reader of `0.1.0rc1` refuses format 2. `from_json` of
+  this version still reads format 1: a result of format 1 has no findings.
+- **The run function gives "error"** for a result whose `findings` is not a
+  tuple of `Finding`, or whose `findings_omitted` is not an `int` of 0 or more.
+
 ## 0.1.0rc1 (2026-09-30)
 
 The first release candidate: version 1 of `docs/plans/pulseq-checks.md`,

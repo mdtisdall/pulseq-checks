@@ -412,7 +412,8 @@ only for the target `Prisma AS82`.
 
 ```
 pulseq-check SEQ_FILE (--config FILE | --target PROFILE [--target PROFILE ...])
-             [--check ID ...] [--fast] [--json OUT] [--quiet]
+             [--check ID ...] [--fast] [--json OUT] [--max-findings N]
+             [--show-findings] [--quiet]
 ```
 
 | Argument | Meaning |
@@ -423,6 +424,8 @@ pulseq-check SEQ_FILE (--config FILE | --target PROFILE [--target PROFILE ...])
 | `--check ID` | Select this check, and make it required for each target. Repeat it for more checks. With `--config`, the IDs are added to its `select` (if it has one) and made required for all targets. |
 | `--fast` | Run only the checks of the cost class `fast`, and the required checks. Selection by cost does not make a check required. The cost class of each check is in [`checks.md`](checks.md). A check that does not declare a class is `slow`. |
 | `--json OUT` | Write the result as [JSON](#6-the-result-json) to the file `OUT`. `-` writes it to the standard output and the summary to the standard error. |
+| `--max-findings N` | Keep only the first `N` findings of each result, in the JSON result and in the summary. `N` must be an integer of 0 or more. The result records the number of the others in `findings_omitted`. Without it, all findings are kept. |
+| `--show-findings` | List each kept finding in the summary (see [the summary](#the-summary)). Without it, the summary gives only a count for each result with findings. |
 | `--quiet` | Do not write the summary. |
 
 Give exactly one of `--config` and `--target`. There is no flag for the limits
@@ -442,14 +445,23 @@ summary still lists each failure. An error in the arguments is 1, not 2.
 
 ### The summary
 
-The summary has four parts:
+The summary has five parts:
 
 1. One line for each check and each target: the state, the check ID, the
    target, the value and the limit with the unit, a short detail (for example
    the axis or the raster), and a mark for a required check.
 2. The "not evaluated" and "error" results, with their reasons.
-3. The unused sections of each profile.
-4. The meaning of the exit status.
+3. The findings. This part is there only when a result has findings. It has
+   one count line for each result with findings. After `--max-findings`, the
+   count line also gives the numbers that the result kept and omitted, for
+   example `4000 findings (1000 kept, 3000 omitted)`. With `--show-findings`,
+   one line follows for each kept finding. The line is
+   `block B at T s: CODE: message` for a finding with a block,
+   `at T s: CODE: message` for a finding with a time and no block, and
+   `CODE: message` for a finding with no location. A message of more than one
+   line has its other lines indented.
+4. The unused sections of each profile.
+5. The meaning of the exit status.
 
 For example, the spin echo of `tests/synthetic.py` against the profile
 `tests/profiles/prisma.toml` (the sequence was made with an RF ringdown of
@@ -471,10 +483,18 @@ results (* = required):
 exit status 2: a check failed
 ```
 
+The findings never go to the standard error on their own. They are a part of
+the summary, which goes to the standard output (to the standard error only with
+`--json -`), and `--quiet` removes them with the rest of the summary. The
+findings do not change the exit status: a result with findings has the state
+that the check gave it. To get all findings with no change to the console
+output, write `--json FILE`. The file has all findings of each result, unless
+you also give `--max-findings`.
+
 A required check has `*` in the first column. When a result is "not
 evaluated" or "error", a block `not evaluated and errors:` follows the table
-with the reason of each, and a block `unused profile sections` lists the
-sections that no check used.
+with the reason of each. When a result has findings, a block `findings` follows.
+A block `unused profile sections` lists the sections that no check used.
 
 ## 5. The Python API
 
@@ -498,7 +518,7 @@ raise SystemExit(matrix.exit_status())
 This is what the command does. The package exports `read_profile`,
 `read_check_config`, `run_checks`, `TargetProfile`, `HardwareLimits`,
 `CheckConfig`, `Result`, `ResultMatrix`, `State`, `Location`, `TargetInfo`,
-`CheckSpec`, `CheckRule`, `RunContext` and the errors.
+`Finding`, `CheckSpec`, `CheckRule`, `RunContext` and the errors.
 
 ### `read_profile(path) -> TargetProfile`
 
@@ -601,8 +621,9 @@ A frozen dataclass:
 | `targets` | A tuple of `TargetInfo`: `name`, `sources`, `unused_sections` and `limits_source` (`"profile"` or `"sequence object"`). |
 | `results` | A tuple of `Result`. |
 | `exit_status()` | 0, 2 or 1, by the [table above](#exit-status). |
+| `with_max_findings(n)` | A new matrix in which each result with more than `n` findings keeps the first `n`, and its `findings_omitted` has the number of the others added. `n` must be an `int` of 0 or more (not a `bool`), else `ValueError`. |
 | `to_json()` | The [JSON](#6-the-result-json) text. |
-| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Raises `ValueError` for a format that is newer than this package, and for an unknown or a missing key. |
+| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Reads format 1 and format 2. Raises `ValueError` for a format that is newer than this package, and for an unknown or a missing key. |
 
 ### `Result`
 
@@ -619,6 +640,46 @@ A frozen dataclass:
 | `reason` | Why the state is "not evaluated" or "error". For a pass or a fail: a short detail, or `None`. |
 | `required` | `True` when the caller named the check for this target. |
 | `spec_url` | The link to the specification. |
+| `findings` | A tuple of `Finding`: the problems that the check found, in the order that the check gave them. The default is `()`. A result of any state can have findings. They do not change the state. |
+| `findings_omitted` | The number of findings that are not in `findings`, because `with_max_findings` removed them. The default is `0`. |
+
+### `Finding`
+
+A frozen dataclass: one problem that a check found.
+
+| Field | Meaning |
+|---|---|
+| `code` | A short, stable name of the kind of finding. A string that is not empty. |
+| `message` | One line of text for a person. A string. |
+| `location` | A `Location`, or `None` (the default). |
+| `data` | A mapping from a name to a value, for a machine. The default is an empty dict. |
+
+`__post_init__` refuses a value that is not valid: `TypeError` when `code` or
+`message` is not a string, when `location` is not a `Location` or `None`, when
+`data` is not a mapping, when a key of `data` is not a string, and when a value
+of `data` is not a string, an `int`, a `float`, a `bool` or `None`; `ValueError`
+when `code` is empty, and when a string value of `data` is `"inf"`, `"-inf"` or
+`"nan"`. The last rule is there because the [JSON](#6-the-result-json) writes a
+float that is not finite as one of these strings, and `from_json` turns the
+string back into a float. A string with the same text could not be told apart.
+A `Finding` with data is not hashable.
+
+To read the findings of a matrix:
+
+```python
+from pulseq_checks import ResultMatrix, read_profile, run_checks
+
+matrix = run_checks("scan.seq", [read_profile("prisma.toml")])
+for result in matrix.results:
+    total = len(result.findings) + result.findings_omitted
+    print(result.check_id, result.target, total, "findings")
+    for finding in result.findings:
+        print(" ", finding.code, finding.location, finding.data)
+
+small = matrix.with_max_findings(100)  # for a report page
+text = small.to_json()  # the findings and findings_omitted go with it
+again = ResultMatrix.from_json(text)
+```
 
 ### The errors
 
@@ -639,11 +700,15 @@ The command catches `CheckRunError` and gives exit status 1.
 
 | Key | Meaning |
 |---|---|
-| `format` | `1`. `from_json` refuses a larger number. |
+| `format` | `2`. `from_json` reads `1` and `2`. A result of format 1 has no `findings` and no `findings_omitted`, and `from_json` gives it no findings. `from_json` refuses a larger number. A reader of `0.1.0rc1` refuses format 2. |
 | `package_version` | The version of `pulseq-checks`. |
 | `sequence` | The path of the `.seq` file, or `"<Sequence object>"`. |
 | `targets` | One object for each target: `name`, `sources` (each value path, with `"profile"` or the `.asc` file as its source), `unused_sections` and `limits_source`. |
-| `results` | One object for each check and target, with the keys of `Result`. `state` is a string. `location` is `null` or `{"block": ..., "time_s": ...}`. |
+| `results` | One object for each check and target, with the keys of `Result`. `state` is a string. `location` is `null` or `{"block": ..., "time_s": ...}`. `findings` is a list of finding objects, and `findings_omitted` is an integer of 0 or more. |
+
+A finding object has the keys `code`, `message`, `location` and `data`, in this
+order. `location` is `null` or `{"block": ..., "time_s": ...}`, and `data` is an
+object. A value of `data` that is a float that is not finite is a string.
 
 The JSON is strict. A float that is not finite is a string: `"inf"`, `"-inf"`
 or `"nan"`. This example is a run of the checks `gradient.amplitude.axis`,
@@ -654,7 +719,7 @@ named as required:
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "package_version": "0.1.0.dev0",
   "sequence": "scan.seq",
   "targets": [
@@ -687,7 +752,9 @@ named as required:
       "model_version": null,
       "reason": "axis x",
       "required": false,
-      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#gradientamplitudeaxis"
+      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#gradientamplitudeaxis",
+      "findings": [],
+      "findings_omitted": 0
     },
     {
       "check_id": "gradient.slew.axis",
@@ -705,7 +772,9 @@ named as required:
       "model_version": null,
       "reason": "axis x",
       "required": true,
-      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#gradientslewaxis"
+      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#gradientslewaxis",
+      "findings": [],
+      "findings_omitted": 0
     },
     {
       "check_id": "pns.safe",
@@ -720,7 +789,9 @@ named as required:
       "model_version": null,
       "reason": "the target 'Prisma AS82' does not give: model pns.safe",
       "required": false,
-      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#pnssafe"
+      "spec_url": "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md#pnssafe",
+      "findings": [],
+      "findings_omitted": 0
     }
   ]
 }
@@ -766,6 +837,7 @@ same.
 | `cost` | `"fast"` or `"slow"`. The default is `"slow"`, so that a check that nobody measured does not make the fast set slow. |
 | `pypulseq` | The pypulseq function that the check uses, or `None`. |
 | `url` | The link to the documentation of the check. A plugin sets it. With `None`, a result links to the heading of the ID in the `checks.md` of this package, which is wrong for a plugin. |
+| `findings` | A text, or `None` (the default). A check that gives findings documents them here: what one finding is, its codes, its location, the keys of `data` and the order of the findings. A check that gives none leaves it `None`. |
 
 The run function does these steps for each target:
 
@@ -777,7 +849,9 @@ The run function does these steps for each target:
 3. It calls `rule.run(ctx)`. An exception gives the result "error", with the
    reason `<exception type>: <message>`. A `run` that returns a result for a
    different check or target, or returns something that is not a `Result`, is
-   an "error" too.
+   an "error" too. So is a result whose `findings` is not a tuple of
+   `Finding`, or whose `findings_omitted` is not an `int` (not a `bool`) of 0
+   or more.
 4. It sets `required` on the result.
 
 `RunContext` has:
@@ -790,7 +864,7 @@ The run function does these steps for each target:
 | `ctx.hardware_limits` | The `HardwareLimits` for the gradient checks, or `None`. |
 | `ctx.has_input(path)` | True when the target gives the value path. |
 | `ctx.measure(name, fn)` | `fn(ctx.sequence)`, calculated one time for each `name` and each target. The other rules of the target get the kept value. |
-| `ctx.result(spec, state, **fields)` | A `Result` with `check_id`, `spec_version`, `target` and `spec_url` set. `fields` are `value`, `limit`, `unit`, `location`, `model`, `model_version` and `reason`. Do not set `required`. |
+| `ctx.result(spec, state, **fields)` | A `Result` with `check_id`, `spec_version`, `target` and `spec_url` set. `fields` are `value`, `limit`, `unit`, `location`, `model`, `model_version`, `reason` and `findings`. Do not set `required`. |
 
 `ctx.measure` makes a measurement once when several checks use it. The first
 call for a name calculates. Later calls with that name return the kept value
@@ -855,6 +929,33 @@ Register it in the `pyproject.toml` of the plugin package:
 [project.entry-points."pulseq_checks.checks"]
 "site.block-duration" = "site_checks.blocks:BLOCK_DURATION"
 ```
+
+A check rule gives its findings with the argument `findings`, a tuple of
+`Finding` ([section 5](#finding)):
+
+```python
+return ctx.result(
+    self.spec,
+    State.FAIL,
+    value=value,
+    limit=MAX_BLOCK_S,
+    unit="s",
+    findings=(
+        Finding(
+            code="BLOCK_TOO_LONG",
+            message=f"block {block} lasts {value:g} s",
+            location=Location(block=block, time_s=start_s),
+            data={"duration_s": value},
+        ),
+    ),
+)
+```
+
+A result of any state can have findings, and they do not change the state. The
+rule gives all of its findings and does not set `findings_omitted`: the command
+and `ResultMatrix.with_max_findings` set it when they remove findings. The
+rule must document its findings in `CheckSpec.findings`: what one finding is,
+its codes, its location, the keys of `data` and the order of the findings.
 
 To test a rule alone, make `RunContext(sequence, profile)` and call
 `rule.run(ctx)`. The run function gives the "not evaluated" and "error"

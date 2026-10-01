@@ -9,7 +9,7 @@ from synthetic import spin_echo_sequence
 from pulseq_checks import registry
 from pulseq_checks.cli import main
 from pulseq_checks.profile import read_profile
-from pulseq_checks.results import ResultMatrix, State
+from pulseq_checks.results import Finding, Location, ResultMatrix, State
 from pulseq_checks.rules import CheckSpec
 from pulseq_checks.run import run_checks
 
@@ -17,10 +17,12 @@ PROFILES = Path(__file__).parent / "profiles"
 
 
 class Rule:
-    """A test check rule that gives `state` for each target. The spec needs `inputs` (value
-    paths) and has the cost class `cost`."""
+    """A test check rule that gives `state` and `findings` for each target. The spec needs
+    `inputs` (value paths) and has the cost class `cost`."""
 
-    def __init__(self, check_id, state=State.PASS, *, cost="slow", inputs=(), detail=None):
+    def __init__(
+        self, check_id, state=State.PASS, *, cost="slow", inputs=(), detail=None, findings=()
+    ):
         self.spec = CheckSpec(
             id=check_id,
             version=1,
@@ -35,12 +37,30 @@ class Rule:
         )
         self.state = state
         self.detail = detail
+        self.findings = tuple(findings)
 
     def run(self, ctx):
         reason = self.detail
         if self.state in (State.NOT_EVALUATED, State.ERROR):
             reason = reason or "a test reason"
-        return ctx.result(self.spec, self.state, value=1.5, limit=2.0, unit="mT/m", reason=reason)
+        return ctx.result(
+            self.spec,
+            self.state,
+            value=1.5,
+            limit=2.0,
+            unit="mT/m",
+            reason=reason,
+            findings=self.findings,
+        )
+
+
+# Three findings: with a block and a time, with a time only (and a message of two lines), and
+# with no location.
+FINDINGS = (
+    Finding("BLOCK_DURATION_MISMATCH", "block 1 lasts 10 us, not 12 us", Location(1, 0.0)),
+    Finding("RASTER", "first line\nsecond line", Location(None, 0.5)),
+    Finding("NO_PLACE", "a finding without a location"),
+)
 
 
 def install(monkeypatch, *rules):
@@ -387,7 +407,17 @@ def test_a_missing_sequence_argument_gives_status_1(profile_a, capsys):
 def test_help_gives_status_0_and_lists_the_options(capsys):
     assert main(["--help"]) == 0
     out = capsys.readouterr().out
-    for option in ("--config", "--target", "--check", "--fast", "--json", "--quiet"):
+    options = (
+        "--config",
+        "--target",
+        "--check",
+        "--fast",
+        "--json",
+        "--max-findings",
+        "--show-findings",
+        "--quiet",
+    )
+    for option in options:
         assert option in out
 
 
@@ -473,6 +503,185 @@ def test_end_to_end_with_the_installed_checks_and_the_prisma_profile(seq_file, c
     for check_id in ("gradient.amplitude.axis", "pns.safe", "timing.rasters"):
         assert check_id in out
     assert out.rstrip().splitlines()[-1].startswith(f"exit status {status}:")
+
+
+def findings_block(out):
+    """The lines of the findings block of a summary, or [] when it has none."""
+    for block in summary_blocks(out):
+        if block.startswith("findings"):
+            return block.splitlines()
+    return []
+
+
+def test_the_summary_has_a_count_line_for_each_result_with_findings_and_no_finding_line(
+    monkeypatch, seq_file, profile_a, capsys
+):
+    install(monkeypatch, Rule("t.a"), Rule("t.f", findings=FINDINGS))
+    assert main([str(seq_file), "--target", str(profile_a)]) == 0
+    out = capsys.readouterr().out
+    blocks = summary_blocks(out)
+    assert [block.splitlines()[0] for block in blocks] == [
+        f"sequence: {seq_file}",
+        "results (* = required):",
+        "findings (each one is in the JSON result; --show-findings lists them here):",
+        "exit status 0: no check failed",
+    ]
+    # One count line, for t.f only. The findings are not in the console output.
+    assert blocks[2].splitlines()[1:] == ["  t.f, target a: 3 findings"]
+    for finding in FINDINGS:
+        assert finding.code not in out
+
+
+def test_a_result_with_one_finding_says_1_finding(monkeypatch, seq_file, profile_a, capsys):
+    install(monkeypatch, Rule("t.f", findings=FINDINGS[:1]))
+    assert main([str(seq_file), "--target", str(profile_a)]) == 0
+    assert findings_block(capsys.readouterr().out)[1:] == ["  t.f, target a: 1 finding"]
+
+
+def test_show_findings_lists_each_finding_after_the_line_of_its_result(
+    monkeypatch, tmp_path, seq_file, capsys
+):
+    install(monkeypatch, Rule("t.f", findings=FINDINGS), Rule("t.g", findings=FINDINGS[2:]))
+    write_profile(tmp_path, "a")
+    write_profile(tmp_path, "b")
+    argv = [
+        str(seq_file),
+        "--target",
+        str(tmp_path / "a.toml"),
+        "--target",
+        str(tmp_path / "b.toml"),
+    ]
+    assert main([*argv, "--show-findings"]) == 0
+    out = capsys.readouterr().out
+    # The results are in the order of the targets, then the check IDs.
+    assert findings_block(out) == [
+        "findings:",
+        "  t.f, target a: 3 findings",
+        "    block 1 at 0 s: BLOCK_DURATION_MISMATCH: block 1 lasts 10 us, not 12 us",
+        "    at 0.5 s: RASTER: first line",
+        "      second line",
+        "    NO_PLACE: a finding without a location",
+        "  t.g, target a: 1 finding",
+        "    NO_PLACE: a finding without a location",
+        "  t.f, target b: 3 findings",
+        "    block 1 at 0 s: BLOCK_DURATION_MISMATCH: block 1 lasts 10 us, not 12 us",
+        "    at 0.5 s: RASTER: first line",
+        "      second line",
+        "    NO_PLACE: a finding without a location",
+        "  t.g, target b: 1 finding",
+        "    NO_PLACE: a finding without a location",
+    ]
+    # The findings part is between the problems and the exit status.
+    assert [block.splitlines()[0] for block in summary_blocks(out)][-2:] == [
+        "findings:",
+        "exit status 0: no check failed",
+    ]
+
+
+def test_json_to_a_file_has_all_the_findings_and_the_console_has_no_finding_line(
+    monkeypatch, tmp_path, seq_file, profile_a, capsys
+):
+    install(monkeypatch, Rule("t.a"), Rule("t.f", findings=FINDINGS))
+    out = tmp_path / "result.json"
+    assert main([str(seq_file), "--target", str(profile_a), "--json", str(out)]) == 0
+    matrix = ResultMatrix.from_json(out.read_text())
+    assert [(r.check_id, r.findings, r.findings_omitted) for r in matrix.results] == [
+        ("t.a", (), 0),
+        ("t.f", FINDINGS, 0),
+    ]
+    console = capsys.readouterr().out
+    assert findings_block(console)[1:] == ["  t.f, target a: 3 findings"]
+    for finding in FINDINGS:
+        assert finding.code not in console
+
+
+def test_json_to_stdout_with_findings_is_only_the_json_and_the_findings_do_not_go_to_stderr(
+    monkeypatch, seq_file, profile_a, capsys
+):
+    install(monkeypatch, Rule("t.f", findings=FINDINGS))
+    assert main([str(seq_file), "--target", str(profile_a), "--json", "-"]) == 0
+    captured = capsys.readouterr()
+    matrix = ResultMatrix.from_json(captured.out)  # fails when stdout has more than the JSON
+    assert matrix.results[0].findings == FINDINGS
+    # stderr has the summary, as before: the count line, and no finding line.
+    assert findings_block(captured.err)[1:] == ["  t.f, target a: 3 findings"]
+    for finding in FINDINGS:
+        assert finding.code not in captured.err
+    # Without --show-findings and with --quiet, nothing else is written to stderr.
+    assert main([str(seq_file), "--target", str(profile_a), "--json", "-", "--quiet"]) == 0
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(("n", "kept"), [(1, FINDINGS[:1]), (0, ())], ids=["one", "zero"])
+def test_max_findings_limits_the_json_and_the_summary_and_records_the_omitted_number(
+    monkeypatch, tmp_path, seq_file, profile_a, capsys, n, kept
+):
+    install(monkeypatch, Rule("t.a"), Rule("t.f", findings=FINDINGS))
+    out = tmp_path / "result.json"
+    argv = [str(seq_file), "--target", str(profile_a), "--max-findings", str(n)]
+    assert main([*argv, "--json", str(out), "--show-findings"]) == 0
+    matrix = ResultMatrix.from_json(out.read_text())
+    assert [(r.findings, r.findings_omitted) for r in matrix.results] == [
+        ((), 0),
+        (kept, 3 - len(kept)),
+    ]
+    lines = findings_block(capsys.readouterr().out)
+    assert lines[:2] == ["findings:", f"  t.f, target a: 3 findings ({n} kept, {3 - n} omitted)"]
+    # One line for each kept finding only.
+    assert len(lines) == 2 + len(kept)
+    if kept:
+        assert lines[2].startswith("    block 1 at 0 s: BLOCK_DURATION_MISMATCH: ")
+
+
+def test_max_findings_at_or_above_the_count_changes_nothing(
+    monkeypatch, tmp_path, seq_file, profile_a, capsys
+):
+    install(monkeypatch, Rule("t.f", findings=FINDINGS))
+    out = tmp_path / "result.json"
+    argv = [str(seq_file), "--target", str(profile_a), "--json", str(out)]
+    assert main([*argv, "--max-findings", "3"]) == 0
+    matrix = ResultMatrix.from_json(out.read_text())
+    assert (matrix.results[0].findings, matrix.results[0].findings_omitted) == (FINDINGS, 0)
+    assert findings_block(capsys.readouterr().out)[1:] == ["  t.f, target a: 3 findings"]
+
+
+@pytest.mark.parametrize("value", ["-1", "x", "1.5"])
+def test_max_findings_that_is_not_an_integer_of_0_or_more_gives_status_1(
+    monkeypatch, seq_file, profile_a, capsys, value
+):
+    install(monkeypatch, Rule("t.f", findings=FINDINGS))
+    assert main([str(seq_file), "--target", str(profile_a), "--max-findings", value]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "pulseq-check: error:" in captured.err
+    assert "--max-findings" in captured.err
+
+
+def test_the_findings_do_not_change_the_status(monkeypatch, seq_file, profile_a, capsys):
+    install(monkeypatch, Rule("t.a", State.FAIL, findings=FINDINGS))
+    assert main([str(seq_file), "--target", str(profile_a), "--show-findings"]) == 2
+    out = capsys.readouterr().out
+    assert out.strip().splitlines()[-1] == "exit status 2: a check failed"
+    install(monkeypatch, Rule("t.a", State.FAIL))
+    assert main([str(seq_file), "--target", str(profile_a), "--show-findings"]) == 2
+
+
+def test_a_run_without_findings_has_no_findings_part_and_the_flags_change_nothing(
+    monkeypatch, seq_file, profile_a, capsys
+):
+    install(monkeypatch, Rule("t.a"), Rule("t.b", State.FAIL, detail="axis y"))
+    argv = [str(seq_file), "--target", str(profile_a)]
+    assert main(argv) == 2
+    plain = capsys.readouterr().out
+    assert [block.splitlines()[0] for block in summary_blocks(plain)] == [
+        f"sequence: {seq_file}",
+        "results (* = required):",
+        "exit status 2: a check failed",
+    ]
+    assert findings_block(plain) == []
+    # --show-findings and --max-findings give the same summary when no result has findings.
+    assert main([*argv, "--show-findings", "--max-findings", "0"]) == 2
+    assert capsys.readouterr().out == plain
 
 
 def test_the_console_script_is_the_main_function_of_the_cli():
