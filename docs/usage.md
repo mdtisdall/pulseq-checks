@@ -487,7 +487,22 @@ results (* = required):
     fail   timing.pypulseq                     Prisma AS82  4 (limit 0)                    first of 4 errors: block 1, block.duration: BLOCK_DURATION_MISMATCH
     pass   timing.rasters                      Prisma AS82  1e-05 s (limit 1e-05 s)        GradientRasterTime: 1e-05 s in the file, 1e-05 s on the target
 
+findings (each one is in the JSON result; --show-findings lists them here):
+  timing.pypulseq, target Prisma AS82: 4 findings
+
 exit status 2: a check failed
+```
+
+The check `timing.pypulseq` gives one finding for each error. With
+`--show-findings`, the part of the findings of the same run is:
+
+```text
+findings:
+  timing.pypulseq, target Prisma AS82: 4 findings
+    block 1 at 0 s: BLOCK_DURATION_MISMATCH: Inconsistency between the stored block duration (1120.00 us) and the content of the block (1130.00 us)
+    block 1 at 0 s: RF_RINGDOWN_TIME: Time between the end of the RF pulse at 1100.00 us and the end of the block at 1120.00 us is shorter than rf_ringdown_time (30 us)
+    block 4 at 0.00247 s: BLOCK_DURATION_MISMATCH: Inconsistency between the stored block duration (1120.00 us) and the content of the block (1130.00 us)
+    block 4 at 0.00247 s: RF_RINGDOWN_TIME: Time between the end of the RF pulse at 1100.00 us and the end of the block at 1120.00 us is shorter than rf_ringdown_time (30 us)
 ```
 
 The findings never go to the standard error on their own. They are a part of
