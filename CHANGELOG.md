@@ -3,7 +3,22 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
-## Unreleased
+## 0.1.0rc2 (2026-09-30)
+
+The second release candidate. Each of the six checks gives findings (the
+plans `docs/plans/check-findings.md` and
+`docs/plans/gradient-pns-findings.md`). The gradient and PNS checks use the
+rasters and the gamma of the file and of the target, not the defaults of
+pypulseq. The JSON result of this version and the JSON result of `0.1.0rc1`
+cannot read each other (see "Changed"). pulseq-reports pins this tag, or a
+later one, for its step 3: `0.1.0rc1` does not have the fixes that
+pulseq-reports has in its copies of the moved modules.
+
+The time budget before the tag (`scripts/budget.py`, 10^6 blocks, Apple M1
+Max, with the read of the file): the fast checks together take 4.28 s
+(budget: 10 s), and all six checks take 24.65 s. On a file that fails the
+three gradient checks in each TR, the fast checks take 7.63 s
+(`docs/plans/gradient-pns-findings.md`, section 7.2).
 
 ### Added
 
