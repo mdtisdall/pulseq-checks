@@ -6,14 +6,26 @@ The three rules share one measurement, `gradient_limits` over the whole file, wh
 argument only as a label of its result (the numbers do not depend on it), but the rules never
 give it `None`, because then it would take the limits of `seq.system` (design section 7.2).
 The limit of a rule comes from the `HardwareLimits` of the target, which `_hardware_limits`
-builds for all three rules in one way."""
+builds for all three rules in one way.
+
+A rule that fails also gives each block that is above its limit as a finding. The values of
+each block come from a second measurement, `gradient_blocks` (`block_gradient_values`), which
+`ctx.measure` calculates one time for each target too, and only when a rule fails."""
 
 from __future__ import annotations
 
 import math
 
-from ..grad_limits import GradientLimits, HardwareLimits, gradient_limits
-from ..results import Location, Result, State
+import numpy as np
+
+from ..grad_limits import (
+    BlockGradientValues,
+    GradientLimits,
+    HardwareLimits,
+    block_gradient_values,
+    gradient_limits,
+)
+from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
 
 # The rule of the gradient limits card of pulseq-reports (fact 8 of the plan): a value passes
@@ -51,6 +63,12 @@ _GAMMA = (
     "when the limits come from the sequence object. The limit uses the same gamma, so the "
     "value and the limit are in the same units."
 )
+_FINDINGS_SENTENCE = "The result also gives each block above the limit as a finding (see Findings)."
+_FINDINGS_FOR_FAIL = (
+    "The findings are calculated only for a fail: a pass gives no finding. A block is above "
+    "the limit by the rule of the state: its value is above limit * (1 + 1e-9). Thus the "
+    "largest value of the findings is the value of the result."
+)
 _RASTERS = ("GradientRasterTime", "BlockDurationRaster")
 _NOT_EVALUATED_RASTERS = (
     'The check is "not evaluated" when the file does not declare GradientRasterTime or '
@@ -83,25 +101,63 @@ def _hardware_limits(ctx: RunContext) -> HardwareLimits:
     )
 
 
+def _gamma(ctx: RunContext) -> float:
+    """The gamma, in Hz/T, of the measurements of the target of `ctx`: the same gamma as the
+    limits of `_hardware_limits`, so that value and limit are in the same units."""
+    if ctx.limits_source == "sequence object":
+        return ctx.sequence.system.gamma
+    return ctx.profile.make_opts().gamma
+
+
 def _measurement(ctx: RunContext) -> tuple[GradientLimits, HardwareLimits]:
     """The measurement of the whole file, calculated one time for each target, and the
     `HardwareLimits` of the target."""
     limits = _hardware_limits(ctx)
-    # The same gamma as the limits of `_hardware_limits`, so value and limit are in the same
-    # units.
-    if ctx.limits_source == "sequence object":
-        gamma = ctx.sequence.system.gamma
-    else:
-        gamma = ctx.profile.make_opts().gamma
+    gamma = _gamma(ctx)
     measurement = ctx.measure(
         "gradient_limits", lambda seq: gradient_limits(seq, limits=limits, gamma=gamma)
     )
     return measurement, limits
 
 
+def _above_limit(value, limit: float):
+    """True where `value` (a number, or an array of them) is above `limit` by the rule of the
+    state of a check: not `value <= limit * (1 + _LIMIT_TOLERANCE)`. A value that is not a
+    number is above the limit, so it fails, as before the findings."""
+    return np.logical_not(value <= limit * (1.0 + _LIMIT_TOLERANCE))
+
+
+def _entries_above_limit(
+    blocks: BlockGradientValues,
+    limit: float,
+    columns: list[tuple[np.ndarray, np.ndarray]],
+) -> tuple[list[int], list[int], list[float], list[float]]:
+    """The entries above `limit` of the (values, times) arrays in `columns` (one entry for each
+    block in each array, in play order), in the play order of the blocks, and in the order of
+    `columns` within one block. Returns the lists, with one item for each entry above the limit,
+    of the index of its column, its block ID, its value and its time in seconds, as Python
+    numbers."""
+    plays, ranks, values, times = [], [], [], []
+    for rank, (column_values, column_times) in enumerate(columns):
+        play = np.flatnonzero(_above_limit(column_values, limit))
+        plays.append(play)
+        ranks.append(np.full(play.size, rank))
+        values.append(column_values[play])
+        times.append(column_times[play])
+    play, rank = np.concatenate(plays), np.concatenate(ranks)
+    # The last key of lexsort is the main key.
+    order = np.lexsort((rank, play))
+    return (
+        rank[order].tolist(),
+        blocks.block_id[play[order]].tolist(),
+        np.concatenate(values)[order].tolist(),
+        np.concatenate(times)[order].tolist(),
+    )
+
+
 class _GradientCheck:
-    """A gradient check: `spec`, its `unit`, the limit that it uses, and the candidates for
-    its value. A subclass gives `_limit` and `_candidates`."""
+    """A gradient check: `spec`, its `unit`, the limit that it uses, the candidates for its
+    value, and its findings. A subclass gives `_limit`, `_candidates` and `_findings`."""
 
     spec: CheckSpec
     unit: str
@@ -115,6 +171,11 @@ class _GradientCheck:
         """The (value, block ID, time in seconds, detail) of each quantity that the check
         compares with its limit, in the order of the tie rule. The detail (for example
         "axis y") is the `reason` of a pass or a fail: which quantity gave the value."""
+        raise NotImplementedError
+
+    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+        """One finding for each block (and axis) of `blocks` that is above `limit`, in the
+        order of the spec."""
         raise NotImplementedError
 
     def run(self, ctx: RunContext) -> Result:
@@ -132,7 +193,14 @@ class _GradientCheck:
             if candidate[0] > value:
                 value, block, time_s, detail = candidate
         location = Location(block=block, time_s=time_s) if value > 0.0 else None
-        state = State.PASS if value <= limit * (1.0 + _LIMIT_TOLERANCE) else State.FAIL
+        state = State.FAIL if _above_limit(value, limit) else State.PASS
+        findings: tuple[Finding, ...] = ()
+        if state is State.FAIL:
+            gamma = _gamma(ctx)
+            blocks = ctx.measure(
+                "gradient_blocks", lambda seq: block_gradient_values(seq, gamma=gamma)
+            )
+            findings = self._findings(blocks, limit)
         return ctx.result(
             self.spec,
             state,
@@ -141,6 +209,7 @@ class _GradientCheck:
             unit=self.unit,
             location=location,
             reason=detail,
+            findings=findings,
         )
 
 
@@ -181,16 +250,47 @@ class _AmplitudeAxis(_GradientCheck):
             + _ROTATION
             + " "
             + _NOT_EVALUATED_RASTERS
+            + " "
+            + _FINDINGS_SENTENCE
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        findings=(
+            "One finding for each block and axis where the peak amplitude of the axis in that "
+            "block is above the limit. A block that is above the limit on two axes gives two "
+            "findings. The findings are in the play order of the blocks, then in the order of "
+            "the axes x, y, z. The code is AMPLITUDE_ABOVE_LIMIT. The location is the block ID "
+            "and the time, in seconds from the start of the sequence, of the first point where "
+            "the peak of that axis is reached in that block. The data are axis (x, y or z, a "
+            "text), value_mt_per_m (the peak amplitude of the axis in the block, in mT/m) and "
+            "limit_mt_per_m (the limit, in mT/m). The message is the axis, the value and the "
+            'limit, with up to 4 significant digits, for example "axis y: 103.2 mT/m, limit 80 '
+            'mT/m". ' + _FINDINGS_FOR_FAIL
+        ),
         rasters=_RASTERS,
     )
     unit = "mT/m"
 
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_grad_mt_per_m
+
+    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+        columns = [(blocks.peak_mt_per_m[a], blocks.peak_time_s[a]) for a in _AXES]
+        axes, block_ids, values, times = _entries_above_limit(blocks, limit, columns)
+        return tuple(
+            Finding(
+                code="AMPLITUDE_ABOVE_LIMIT",
+                message=f"axis {_AXES[axis]}: {value:.4g} mT/m, limit {limit:.4g} mT/m",
+                location=Location(block=block, time_s=time_s),
+                data={
+                    "axis": _AXES[axis],
+                    "value_mt_per_m": value,
+                    "limit_mt_per_m": limit,
+                },
+            )
+            for axis, block, value, time_s in zip(axes, block_ids, values, times, strict=True)
+        )
 
     def _candidates(
         self, measured: GradientLimits
@@ -253,16 +353,71 @@ class _SlewAxis(_GradientCheck):
             + _ROTATION
             + " "
             + _NOT_EVALUATED_RASTERS
+            + " "
+            + _FINDINGS_SENTENCE
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        findings=(
+            "One finding for each block and axis where the slew of a straight segment of the "
+            "gradient event of that block, or the step at the start of the block, is above the "
+            "limit. A segment and a step are two findings, also when they are in the same block "
+            "and on the same axis. The findings are in the play order of the blocks, then in "
+            "the order of the axes x, y, z, then the step before the segment, because the step "
+            "is at the start of the block. The code is SLEW_ABOVE_LIMIT for a segment, and "
+            "JUNCTION_SLEW_ABOVE_LIMIT for a step. For a segment, the finding is for the "
+            "steepest segment of the event of the axis in the block (the first one of equal "
+            "slew), and its location is the block ID and the start time of that segment, in "
+            "seconds from the start of the sequence. For a step, the location is the block "
+            "after the junction (its block ID) and the start time of that block. The data of "
+            "both codes are axis (x, y or z, a text), value_t_per_m_per_s (the slew of the "
+            "segment, or the step divided by the gradient raster time, in T/m/s) and "
+            "limit_t_per_m_per_s (the limit, in T/m/s). The message of SLEW_ABOVE_LIMIT is "
+            '"axis", the axis, a colon, "segment slew", the value and "T/m/s", a comma, "limit" '
+            'and the limit and "T/m/s", for example "axis y: segment slew 103.2 T/m/s, limit '
+            '80 T/m/s". The message of JUNCTION_SLEW_ABOVE_LIMIT has "step at the block start" '
+            'in place of "segment slew", for example "axis y: step at the block start 103.2 '
+            'T/m/s, limit 80 T/m/s". The values have up to 4 significant digits. '
+            + _FINDINGS_FOR_FAIL
+        ),
         rasters=_RASTERS,
     )
     unit = "T/m/s"
 
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_slew_t_per_m_per_s
+
+    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+        # The order of the columns is the order within a block: for each axis, the junction
+        # (at the start of the block) and then the segment.
+        columns = []
+        for a in _AXES:
+            columns.append((blocks.junction_t_per_m_per_s[a], blocks.start_s))
+            columns.append((blocks.slew_t_per_m_per_s[a], blocks.slew_time_s[a]))
+        ranks, block_ids, values, times = _entries_above_limit(blocks, limit, columns)
+        findings = []
+        for rank, block, value, time_s in zip(ranks, block_ids, values, times, strict=True):
+            axis = _AXES[rank // 2]
+            if rank % 2 == 0:
+                code = "JUNCTION_SLEW_ABOVE_LIMIT"
+                what = "step at the block start"
+            else:
+                code = "SLEW_ABOVE_LIMIT"
+                what = "segment slew"
+            findings.append(
+                Finding(
+                    code=code,
+                    message=f"axis {axis}: {what} {value:.4g} T/m/s, limit {limit:.4g} T/m/s",
+                    location=Location(block=block, time_s=time_s),
+                    data={
+                        "axis": axis,
+                        "value_t_per_m_per_s": value,
+                        "limit_t_per_m_per_s": limit,
+                    },
+                )
+            )
+        return tuple(findings)
 
     def _candidates(
         self, measured: GradientLimits
@@ -314,16 +469,42 @@ class _AmplitudeAnyOrientation(_GradientCheck):
             + _ROTATION
             + " "
             + _NOT_EVALUATED_RASTERS
+            + " "
+            + _FINDINGS_SENTENCE
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        findings=(
+            "One finding for each block where the peak of |G| in that block is above the "
+            "limit, in the play order of the blocks. The code is VECTOR_AMPLITUDE_ABOVE_LIMIT. "
+            "The location is the block ID and the time, in seconds from the start of the "
+            "sequence, of the first point in the block where the peak of |G| is reached. The "
+            "data are value_mt_per_m (the peak of |G| in the block, in mT/m) and "
+            "limit_mt_per_m (the limit, in mT/m). The message is |G|, the value and the limit, "
+            'with up to 4 significant digits, for example "|G| 103.2 mT/m, limit 80 mT/m". '
+            + _FINDINGS_FOR_FAIL
+        ),
         rasters=_RASTERS,
     )
     unit = "mT/m"
 
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_grad_mt_per_m
+
+    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+        _, block_ids, values, times = _entries_above_limit(
+            blocks, limit, [(blocks.vector_peak_mt_per_m, blocks.vector_peak_time_s)]
+        )
+        return tuple(
+            Finding(
+                code="VECTOR_AMPLITUDE_ABOVE_LIMIT",
+                message=f"|G| {value:.4g} mT/m, limit {limit:.4g} mT/m",
+                location=Location(block=block, time_s=time_s),
+                data={"value_mt_per_m": value, "limit_mt_per_m": limit},
+            )
+            for block, value, time_s in zip(block_ids, values, times, strict=True)
+        )
 
     def _candidates(
         self, measured: GradientLimits

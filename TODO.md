@@ -1,17 +1,14 @@
 # TODO
 
 - **Findings of more checks (section 8 of `docs/plans/check-findings.md`).**
-  Only `timing.pypulseq` and `timing.rasters` give findings. These checks can
-  give them later: `gradient.amplitude.axis` and `gradient.slew.axis` (one
-  finding for each block above the limit, by axis),
-  `gradient.amplitude.any-orientation` (one finding for each block where |G|
-  is above the limit) and `pns.safe` (one finding for each interval where the
-  PNS total is at or above 100 %). Each check is its own task. In the release
-  candidates, the specification of each check stays version 1 (design
-  section 5.4): its findings go into `CHANGELOG.md` only. From the first
-  final release (0.1.0) on, decide for each check whether its version
-  changes. For `timing.pypulseq` it did not, because the findings do not
-  change the verdict (decision D6 of the plan).
+  Only `pns.safe` still gives no findings. It can give them later: one
+  finding for each interval where the PNS total is at or above 100 % (phase 2
+  of `docs/plans/gradient-pns-findings.md`). In the release candidates, the
+  specification of each check stays version 1 (design section 5.4): its
+  findings go into `CHANGELOG.md` only. From the first final release (0.1.0)
+  on, decide for each check whether its version changes. For `timing.pypulseq`
+  it did not, because the findings do not change the verdict (decision D6 of
+  `docs/plans/check-findings.md`).
 
 - **Unequal rasters (R6 of `docs/plans/pulseq-checks.md`).** Version 1 of
   `timing.rasters` passes only when the rasters of the file equal the

@@ -95,8 +95,8 @@ class RunContext:
 
     def measure(self, name: str, fn: Callable[[pp.Sequence], Any]) -> Any:
         """`fn(self.sequence)`, calculated one time for each `name` in this context and kept
-        for the other rules of this target. The version 1 names are "index",
-        "gradient_limits" and "pns_levels"."""
+        for the other rules of this target. The names of this package are "index",
+        "gradient_limits", "gradient_blocks" and "pns_levels"."""
         if name not in self._measurements:
             self._measurements[name] = fn(self.sequence)
         return self._measurements[name]

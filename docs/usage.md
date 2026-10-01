@@ -61,9 +61,11 @@ problem), a message for a person, a location (the block ID and the time in
 seconds) and data (the values of the problem, by name). `timing.pypulseq`
 gives one finding for each error of `check_timing` of pypulseq, and
 `timing.rasters` gives one finding for each raster that differs from the
-target or that the file does not declare correctly. The other checks of this
-package give no findings. A plugin check can give its own
-([section 7](#a-check-rule)). The specification of a check in
+target or that the file does not declare correctly. The three gradient checks
+(`gradient.amplitude.axis`, `gradient.slew.axis` and
+`gradient.amplitude.any-orientation`) give one finding for each block, and
+axis, that is above the limit. `pns.safe` gives no findings. A plugin check
+can give its own ([section 7](#a-check-rule)). The specification of a check in
 [`checks.md`](checks.md) says what its findings are.
 
 The findings do not change the state of a result or the exit status. The
@@ -929,7 +931,8 @@ result is about 200 MB. `--max-findings N` (or
 `ResultMatrix.with_max_findings(N)` in Python) keeps the first `N` findings of
 each result. The number of the others is in `findings_omitted`, so the next
 tool knows that the list is not complete. With `--max-findings 1000`, the same
-result is 0.5 MB.
+result is 0.5 MB. A gradient check that fails in each TR gives one finding for
+each such block and axis, so `--max-findings` matters there too.
 
 ## 7. Writing a plugin
 
@@ -1008,6 +1011,7 @@ and do not call their `fn`. The names of version 1 are:
 |---|---|---|
 | `"index"` | The block table of the sequence | `pulseq_checks.seq_index.sequence_index` |
 | `"gradient_limits"` | The peaks over the whole file | `pulseq_checks.grad_limits.gradient_limits(seq, limits=...)` |
+| `"gradient_blocks"` | The gradient values of each block | `pulseq_checks.grad_limits.block_gradient_values(seq, gamma=...)` |
 | `"pns_levels"` | The SAFE PNS levels | `pulseq_checks.pns.pns_levels_for(seq, hardware=(hw, label))` |
 
 Use a name only with the function in this table. A plugin that uses the name
@@ -1158,10 +1162,9 @@ reader.
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
-- **Findings from the two timing checks only.** Only `timing.pypulseq` and
-  `timing.rasters` give findings. The other checks give their worst value and
-  its location only. The checks that can give findings later are in
-  [`TODO.md`](../TODO.md). A plugin check can give findings now
+- **No findings from `pns.safe`.** Each check of this package gives findings
+  except `pns.safe`, which gives its worst value and its location only. The
+  item is in [`TODO.md`](../TODO.md). A plugin check can give findings now
   ([section 7](#a-check-rule)).
 - **No convention checks** (handedness, axis mapping), and no worst-case slew
   under rotation. They come later.

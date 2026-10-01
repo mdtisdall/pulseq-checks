@@ -3,8 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved (2026-10-01). The user approved the recommended answers of
-section 5. Phase 1 has not started.
+Status: phase 1 done, phase 2 not started (2026-10-01). The user approved
+the recommended answers of section 5. Section 7 has the measurements and the
+changes to this plan during the work.
 
 ## 1. Goal
 
@@ -222,4 +223,43 @@ Each phase also:
 
 ## 7. Results
 
-Empty until phase 1.
+### 7.1 Changes to this plan during the work
+
+- **Phase 1.** The rule "above the limit" is written as "not at or below
+  `limit * (1 + 1e-9)`", the rule of the state before this plan. Written as
+  `value > limit * (1 + 1e-9)`, it gave "pass" for a value that is not a
+  number, which failed before. Now such a value fails, as before, and is a
+  finding (`test_a_value_that_is_not_a_number_is_above_the_limit`).
+- **Phase 1.** `rules.py`: the docstring of `RunContext.measure` names
+  `"gradient_blocks"`.
+
+### 7.2 Measurements of phase 1
+
+Apple M1 Max, Python 3.12, pypulseq 1.5.0.post1. `build_repeating(200000)`
+of `tests/scale_sequences.py` (10⁶ blocks). The passing profile is the
+profile of `scripts/budget.py`. The failing profile is the same with
+`max_grad = 20` (mT/m) and `max_slew = 100` (T/m/s), so the three gradient
+checks fail in each TR. Each time is the median of 3 runs, each in a fresh
+process: `run_checks(path, [profile], ...)`, with the read of the file.
+"Before" is `main` at `69ade39`.
+
+| | Before | After |
+|---|---|---|
+| Fast checks together, passing file | 4.29 s | 4.42 s (+3 %) |
+| `gradient.amplitude.axis`, passing file | 4.38 s | 4.39 s |
+| `gradient.slew.axis`, passing file | 4.37 s | 4.33 s |
+| `gradient.amplitude.any-orientation`, passing file | 4.34 s | 4.41 s |
+| Fast checks together, failing file | 4.40 s | 7.63 s |
+| `gradient.amplitude.axis`, failing file | 4.36 s | 5.29 s |
+| `gradient.slew.axis`, failing file | 4.36 s | 5.94 s |
+| `gradient.amplitude.any-orientation`, failing file | 4.33 s | 5.19 s |
+| Peak RSS, fast checks, failing file | 0.67 GB | 1.31 GB |
+
+Both stop rules of section 6 hold: the passing file is within 5 %, and the
+fast checks on the failing file take less than 10 s.
+
+The failing file gives 246 890 findings of `gradient.amplitude.axis`,
+246 890 of `gradient.amplitude.any-orientation` and 462 520 of
+`gradient.slew.axis` (all `SLEW_ABOVE_LIMIT`). The JSON result of the fast
+checks is 357.9 MB (`to_json` 8.7 s), and 1.1 MB with
+`with_max_findings(1000)`.

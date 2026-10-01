@@ -1240,6 +1240,12 @@ junction-step cases of section 4.6 item 6, a window that starts inside a block a
 junction step, and comparisons with the oracle
 (`tests/oracles/grad_limits.py`, the implementation from before phase 4).
 
+The last group tests `block_gradient_values` (`docs/plans/gradient-pns-findings.md`, section
+3.1): the values of each block, in play order, for the findings of the gradient checks. Its
+main test compares the maxima over the blocks with the whole-file result of `gradient_limits`.
+The other tests check the blocks without an event on an axis, the junction step of each block,
+the arrays, and the refusal of the rotation extension.
+
 #### `test_trapezoid_peak_slew_and_rms_match_hand_computed_values`
 
 **Checks:** For a single x trapezoid, `gradient_limits` gives the peak
@@ -1625,6 +1631,132 @@ rotation library.
 **How:** `gre_sequence(num_trs=2)` with a non-empty `rotation_library` (the
 `_with_rotation_library` helper of `test_extensions.py`), inside
 `pytest.raises(NotImplementedError, match="rotation extension")`.
+
+**Assumptions:** None.
+
+#### `test_block_gradient_values_agree_with_gradient_limits_for_the_whole_file`
+
+**Checks:** For each of 32 sequences (parametrized), the maxima of `block_gradient_values`
+over the blocks are the whole-file values of `gradient_limits`, with the same block and the
+same time. For each axis: the maximum of `peak_mt_per_m` is `peak_mt_per_m` of the axis, and
+the first block in play order with that maximum has the `peak_block` and the `peak_time_s`. The
+maximum over the blocks of the larger of `slew_t_per_m_per_s` and `junction_t_per_m_per_s` is
+`max_slew_t_per_m_per_s`, and the first block with that maximum has the `slew_block`, with the
+start of the block as the time when its junction step has the maximum (the junction is before
+every segment of its block), otherwise the `slew_time_s` of its segment. The maximum of
+`vector_peak_mt_per_m` is `vector_peak_mt_per_m` of the result, with the same block and time.
+When the maximum is 0, `gradient_limits` has no block (None).
+
+**How:** The sequences are `spin_echo_sequence`, `gre_sequence`, `empty_sequence`,
+`arbitrary_gradient_sequence`, `border_sequence`, `raster_4us_sequence`, `build_repeating(50)`
+and `build_worst(50)` of `tests/scale_sequences.py`, four junction sequences of this file (a
+step between two extended trapezoids, the same with a segment of the second block that has the
+same slew as the step, a gradient that ends non-zero before a delay, a first block that starts
+non-zero), and 20 random sequences of `_random_gradient_sequence` (seeds 0 to 19). For each
+sequence the test calls `block_gradient_values` and `gradient_limits` (with any
+`HardwareLimits`, which the values do not use) and compares them with `==`, not
+`pytest.approx`.
+
+**Assumptions:**
+
+- Exact equality holds because both functions use the same arithmetic on the same
+  per-event values: the same `_event_values`, `start_s + offset` for the times, `/ gamma * 1e3`
+  for an amplitude, `/ gamma` for a slew, and the junction step divided by
+  `seq.grad_raster_time`.
+- The 20 random sequences have no junction step (every event starts and ends at 0), the junction
+  sequences have no random part. The test does not compare a window: `block_gradient_values` has
+  no window.
+
+#### `test_block_gradient_values_with_gamma_scale_the_values_as_gradient_limits_does`
+
+**Checks:** `block_gradient_values(seq, gamma=40e6)` gives the amplitudes, the slews and the
+junction steps of each block of the default call times 42.576e6 / 40e6, with the same times,
+and it agrees with `gradient_limits(seq, gamma=40e6)` on the whole file.
+
+**How:** The test calls `block_gradient_values` on `gre_sequence()` with and without `gamma` and
+compares each array with `numpy.testing.assert_allclose` (relative tolerance 1e-12), the times
+with `assert_array_equal`. It then runs the comparison with `gradient_limits` of the first test
+(exact equality) with `gamma=40e6`.
+
+**Assumptions:** The default call is correct (the first test of this group).
+
+#### `test_block_without_an_event_on_an_axis_has_zero_values_and_its_start_as_time`
+
+**Checks:** An axis without an event in a block has a peak, a slew and a junction step of 0
+there, and the start of the block as the peak time and the slew time. A block without gradients
+has a vector peak of 0 at the start of the block. The values of the axes with an event are the
+hand-computed ones.
+
+**How:** The test builds three blocks: x and y trapezoids (x: 0.5 of the maximum gradient, a rise
+of 0.2 ms; y: 0.25 of it, a rise of 0.1 ms, a flat top of 0.2 ms), a z trapezoid, and a delay.
+It checks the peak, the peak time and the slew of x in block 1, the peak of y in block 1 and of z
+in block 2, the zero values and the start times on every axis and block without an event, the
+vector peak of block 1 (`hypot(0.5, 0.25)` of the maximum gradient, at 0.2 ms), of block 2 and
+of the delay block (0 at its start), with `pytest.approx` for the hand-computed values and exact
+equality for the zeros and the start times.
+
+**Assumptions:** None.
+
+#### `test_first_block_junction_step_uses_zero_before_the_block`
+
+**Checks:** For a first block whose gradient starts at a non-zero value, the junction step of
+its axis is that value divided by `seq.grad_raster_time` (and by the gamma), and the junction
+step of the other axes is 0.
+
+**How:** One extended trapezoid on x that starts at 0.9 of the largest step that `add_block`
+accepts (`max_slew * grad_raster_time`). The test checks `junction_t_per_m_per_s` of the block
+for x, y and z.
+
+**Assumptions:** None.
+
+#### `test_junction_step_is_at_the_start_of_the_block_after_the_junction`
+
+**Checks:** The step at a junction is in the block after the junction. For two x extended
+trapezoids with a step between them, followed by a delay, block 1 and block 3 have a step of 0
+and block 2 has the step divided by the raster. A gradient that ends at a non-zero value before a
+delay gives that value divided by the raster as the step of the delay block, and 0 for the
+first block.
+
+**How:** The test builds the two sequences and compares `junction_t_per_m_per_s["x"]` with the
+hand-computed value (`pytest.approx`) and with 0 (exact).
+
+**Assumptions:** None.
+
+#### `test_junction_step_and_segment_of_one_block_with_the_same_slew_give_the_junction_time`
+
+**Checks:** When the junction step and the first segment of the same block have the same slew,
+and it is the largest of the file, `gradient_limits` credits that block and gives the start of the
+block (the junction) as the time, and `block_gradient_values` has equal `junction_t_per_m_per_s`
+and `slew_t_per_m_per_s` in that block.
+
+**How:** Block 1 is an x extended trapezoid that ends at `x`. Block 2 starts at `x - step` and
+reaches `x` in one gradient raster, with `step` 0.9 of the largest step that `add_block` accepts.
+The test checks the two slews with `==`, then the `slew_block`, `slew_time_s` and
+`max_slew_t_per_m_per_s` of `gradient_limits`.
+
+**Assumptions:** The two slews are equal in floating point for these values (the value of both is
+about 135 T/m/s). The test checks this with `==`.
+
+#### `test_block_gradient_values_are_in_play_order_with_one_entry_for_each_block`
+
+**Checks:** Each array has one entry for each block, `block_id` and `start_s` equal the arrays of
+`sequence_index(seq)` (play order), the four dicts have the keys x, y and z, and the arrays are of
+type float64 (`block_id` aside).
+
+**How:** The test calls `block_gradient_values` on `gre_sequence(num_trs=3)`, compares `block_id`
+and `start_s` with `assert_array_equal`, and checks the shape and the dtype of each of the 17
+float arrays and that `start_s` increases.
+
+**Assumptions:** None.
+
+#### `test_block_gradient_values_refuses_rotations`
+
+**Checks:** `block_gradient_values` raises `NotImplementedError` for a sequence with a rotation
+library.
+
+**How:** The same as `test_gradient_limits_refuses_rotations`: the `_with_rotation_library`
+sequence of `test_extensions.py`, inside `pytest.raises(NotImplementedError, match="rotation
+extension")`.
 
 **Assumptions:** None.
 
@@ -4778,13 +4910,17 @@ later pypulseq that stores a rotation in another way (see `refuse_rotations`).
 **Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
 cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
 rule, `opts.max_grad` for the other two), the rasters `GradientRasterTime` and
-`BlockDurationRaster`, and a non-empty title, quantity, limit, tolerance and pass condition.
+`BlockDurationRaster`, a non-empty title, quantity, limit, tolerance and pass condition, and a
+`findings` text that names each code of the rule (`AMPLITUDE_ABOVE_LIMIT`; `SLEW_ABOVE_LIMIT`
+and `JUNCTION_SLEW_ABOVE_LIMIT`; `VECTOR_AMPLITUDE_ABOVE_LIMIT`).
 
-**How:** The test compares each field, and checks that each of the five texts is a string
-with a character that is not white space.
+**How:** The test compares each field, checks that each of the five texts is a string
+with a character that is not white space, and that `findings` is a string with each code of the
+rule in it.
 
-**Assumptions:** The test does not check the text of the specification: a person reads it
-in `docs/checks.md` (phase 6). It does not check the entry points in `pyproject.toml`.
+**Assumptions:** The test does not check the rest of the text of the specification: a person
+reads it in `docs/checks.md` (phase 6). It does not check the entry points in
+`pyproject.toml`. The version stays 1 (design section 5.4).
 
 #### `test_the_slew_of_a_junction_uses_the_gradient_raster_of_the_file_for_any_target`
 
@@ -4831,6 +4967,152 @@ with a profile that gives both limits and the raster. The values have a relative
 
 **Assumptions:** The raster of the target is the raster that pypulseq uses for the missing
 definition (`seq.system`). This behavior did not change in this phase: the test pins it.
+
+The next tests check the findings of the three rules (`docs/plans/gradient-pns-findings.md`,
+sections 3.2 and 4). Most of them use `findings_sequence`: five blocks, with the rise time 100 µs
+as in the other tests (block 1: x at 30 mT/m; block 2: a delay; block 3: y at 10 mT/m; block 4: x
+at 25 and y at 40 mT/m at the same time; block 5: z at 22 and x at 5 mT/m). With the limit 20
+mT/m (200 T/m/s) block 3 and the x of block 5 are below the limit, and block 4 has two axes above
+it. |G| is 30, 10, hypot(25, 40) and hypot(22, 5) mT/m. The expected findings of each rule
+(`FINDINGS_EXPECTED`) are written by hand from these amplitudes: the peak time of an amplitude is
+the end of the rise (the start of the block plus 100 µs), the time of a slew is the start of the
+block (the start of the rise).
+
+#### `test_a_pass_has_no_findings_and_does_not_measure_the_blocks`
+
+**Checks:** For each of the three rules, a result of "pass" has no findings, and the measurement
+`gradient_blocks` is not calculated: `block_gradient_values` is not called, and the measurements
+of the `RunContext` have `gradient_limits` and not `gradient_blocks`.
+
+**How:** The test runs the rule on `findings_sequence` with a limit that is 3 times the limit of
+the fail tests, with a `RunContext` that it makes, and with `block_gradient_values` of the check
+module replaced by a function that keeps the calls of the real one. It checks the state, the
+findings, the list of calls and the keys of `ctx._measurements`.
+
+**Assumptions:** The test reads `ctx._measurements`, a private attribute, because the
+measurement is not visible in the result.
+
+#### `test_a_fail_has_one_finding_for_each_block_and_axis_above_the_limit_in_order`
+
+**Checks:** For each rule, a fail has one finding for each block (and axis) above the limit, in
+the play order of the blocks, and then in the order of the axes x, y, z. A block and an axis below
+the limit give no finding (block 3, and the x of block 5). Each finding has the expected code,
+the block, the time, the keys of `data` (`axis` for the two axis rules, the value and the limit
+with their units), the value, the limit as the limit of the target, and the message with the
+axis, the value (4 significant digits) and the limit. The amplitude rule gives 4 findings, the
+slew rule 4 (all `SLEW_ABOVE_LIMIT`, because `findings_sequence` has no junction step), the
+vector rule 3.
+
+**How:** The test runs the rule with the limit 20 mT/m (or 200 T/m/s) and compares the findings
+with `FINDINGS_EXPECTED`. The values and times have `pytest.approx`, the limit and the codes are
+exact.
+
+**Assumptions:** The trapezoids of `findings_sequence` have equal rise and fall slopes, so the
+first segment (the rise) is the steepest one.
+
+#### `test_the_data_of_a_finding_are_python_scalars`
+
+**Checks:** The block of the location of each finding is a Python `int`, its time a Python
+`float`, and each value of `data` a Python `float` or `str`, not a NumPy type.
+
+**How:** The test checks `type(...)` of each of them for each of the three rules.
+
+**Assumptions:** None.
+
+#### `test_a_fail_measures_the_blocks_one_time_for_each_target_and_does_not_change_the_result`
+
+**Checks:** A fail calls `block_gradient_values` one time for each target, with the gamma that
+`gradient_limits` uses (the default 42.576 MHz/T for a profile without a gamma), and a second
+run of the rule on the same `RunContext` gives the same findings without a second call. The value,
+the location and the reason of the result are the ones that the rule gives for a limit that the
+sequence does not reach; the limit and the unit are those of the target.
+
+**How:** The test runs the rule two times on one `RunContext` and a third time on a new one
+with the limit `FAR`, with `block_gradient_values` replaced as in the first test.
+
+**Assumptions:** None.
+
+#### `test_the_worst_finding_is_the_value_and_the_location_of_the_result`
+
+**Checks:** The largest value of the findings is the value of the result (equal, not
+approximately), and the location of that finding is the location of the result. Each finding is
+above the limit.
+
+**How:** The test takes the finding with the largest value in `data` and compares it with
+the result.
+
+**Assumptions:** The value of the finding is calculated by `block_gradient_values` and the value
+of the result by `gradient_limits`, with the same arithmetic (`test_grad_limits.py` compares them
+with `==`).
+
+#### `test_a_block_within_the_tolerance_of_the_limit_has_no_finding`
+
+**Checks:** A block whose value is above the limit by 5e-10 (relative, within the tolerance
+1e-9) gives no finding, while a block that is clearly above the limit does.
+
+**How:** The test builds two blocks (x at 20 and x at 30 mT/m). It takes the value of the first
+block from a run with the limit `FAR`, and sets the limit to that value divided by `1 + 5e-10`.
+The result is a fail (block 2), and the only finding is for block 2.
+
+**Assumptions:** The value of the x trapezoid at 20 mT/m is the same in the two sequences (the
+same trapezoid).
+
+#### `test_a_value_that_is_not_a_number_is_above_the_limit`
+
+**Checks:** The rule that gives the state and selects the findings, "not at or below
+`limit * (1 + 1e-9)`", counts a value that is not a number as above the limit, so such a
+value fails, as it did before the findings, and is a finding. A value at the limit, and a
+value above it by less than the tolerance, are not above it; a value above it by more than
+the tolerance is.
+
+**How:** The test calls `gradient._above_limit` with an array of nan, the limit, the limit
+times `1 + 5e-10` and the limit times `1 + 2e-9`, and with the scalar nan, and compares the
+results.
+
+**Assumptions:** `gradient_limits` does not give nan for a normal file; the test covers the
+rule only, not a sequence that makes nan.
+
+#### `test_a_junction_step_and_a_segment_of_the_same_block_give_two_findings_the_step_first`
+
+**Checks:** For a block with a step at its start and a segment, both above the slew limit on the
+same axis, `gradient.slew.axis` gives two findings for that block and axis, the
+`JUNCTION_SLEW_ABOVE_LIMIT` one before the `SLEW_ABOVE_LIMIT` one. Both have the block 2, the
+start of block 2 as the time, the value 135 T/m/s and the limit 100 T/m/s, and the messages of
+their codes. The result value is 135 T/m/s, at block 2.
+
+**How:** The test builds two extended trapezoids on the system `SYSTEM` (the sequence of
+`test_grad_limits.py`, `_junction_and_segment_sequence`): block 1 ends at 8.4 mT/m, block 2
+starts at 0.9 times the largest step that `add_block` accepts below it, and its first segment
+returns in one gradient raster. The slew of block 1 is 84 T/m/s. It runs the rule with the limit
+100 T/m/s.
+
+**Assumptions:** `add_block` accepts the step (it is 0.9 of the largest one).
+
+#### `test_a_step_before_a_block_with_no_gradient_gives_a_finding_at_the_start_of_that_block`
+
+**Checks:** A gradient that ends at a value that is not 0, followed by a block with no gradient
+on that axis (a delay), gives one `JUNCTION_SLEW_ABOVE_LIMIT` finding at block 2 and the start
+of block 2 (200 µs), with the value 135 T/m/s. No segment is above the limit.
+
+**How:** The test builds the sequence on `SYSTEM` (as
+`_gradient_ends_non_zero_before_delay_sequence` of `test_grad_limits.py`) and runs the slew rule
+with the limit 100 T/m/s.
+
+**Assumptions:** None.
+
+#### `test_a_profile_with_another_gamma_gives_findings_in_the_units_of_the_result`
+
+**Checks:** For a profile with gamma 40 MHz/T, a 21 mT/m gradient (slew 210 T/m/s) and the limits
+20 mT/m and 200 T/m/s, each rule fails with one finding whose value is equal to the value of the
+result (21 mT/m, or 210 T/m/s for the slew), in the same units as the limit. With 42.576 MHz/T
+the value would be 19.7 mT/m and pass.
+
+**How:** The test builds the sequence in memory with a system with gamma 40 MHz/T, runs each
+rule with `run_one`, and compares the value of the one finding with the value of the result
+(equal) and with the hand-computed value (`pytest.approx`).
+
+**Assumptions:** The sequence object is not written to a file, so the values have no rounding of
+the file.
 
 ### 2.15 PNS check (`test_check_pns.py`)
 
