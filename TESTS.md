@@ -3893,6 +3893,18 @@ build directly (`make_target`), with the rasters 10 µs (gradient), 1 µs (RF), 
 and 10 µs (block duration), and the RF dead time 100 µs, RF ringdown 20 µs and ADC dead
 time 10 µs, unless a test says otherwise.
 
+The tests of the findings of `timing.pypulseq` use two more sequences. `error_sequence` is
+the sequence above and a fifth block with an ADC (a delay of 10 µs, 64 samples of 20 µs),
+written as a `.seq` file. The test reads it with the `Opts` of a target with an RF dead
+time of 200 µs, an RF ringdown of 50 µs and an ADC dead time of 30 µs (`ERROR_OPTS`), so
+that `check_timing` gives BLOCK_DURATION_MISMATCH, RF_DEAD_TIME and RF_RINGDOWN_TIME in
+blocks 2 and 4, and BLOCK_DURATION_MISMATCH, ADC_DEAD_TIME and POST_ADC_DEAD_TIME in block
+5. `raster_error_sequence` has a delay of 1 ms, an ADC with a dwell of 20051.5 ns and a
+delay of 1001.23 µs. It stays in memory, because pypulseq does not write a block whose
+duration is not on the raster, and it gives three RASTER errors. The expected values of
+`data` are computed by hand from the parameters of the sequences. The tests compare a
+message with the text that `print_error_report` of pypulseq prints.
+
 #### `test_equal_rasters_pass`
 
 **Checks:** With a file that declares the rasters of the target, the result is "pass"
@@ -4031,6 +4043,119 @@ test compares the location with block 2 and 1 ms.
 **Assumptions:** The start time is the sum of the block durations of `sequence_index`. The
 block IDs are the pypulseq block numbers, from 1.
 
+#### `test_one_finding_for_each_error_in_the_order_of_check_timing`
+
+**Checks:** For the target with an RF dead time of 200 µs, the result of `timing.pypulseq`
+has one finding for each error of `check_timing`, with the codes of the errors in the same
+order (here two RF_DEAD_TIME), and no omitted findings. The value of the result is the
+number of errors, its limit 0, its location the location of the first finding, and its
+reason `first of 2 errors: block 2, rf.delay: RF_DEAD_TIME`.
+
+**How:** The test runs the check through `run_checks`. It reads the same file with the
+`Opts` of the target and calls `check_timing` on it, and compares the codes and the block
+IDs of the findings with the errors.
+
+**Assumptions:** `check_timing` gives the same errors when the check and the test read the
+file, so the test compares the codes with a second reading and not with fixed names, and
+also checks the names. The reason text did not change from before the findings.
+
+#### `test_the_location_of_a_finding_is_its_block_and_the_start_of_that_block`
+
+**Checks:** The location of each finding is the block of its error and the start time of
+that block: block 2 at 1 ms and block 4 at 4.12 ms.
+
+**How:** The test runs the check for the target with an RF dead time of 200 µs and compares
+the locations of the two findings with the two expected locations.
+
+**Assumptions:** Block 4 starts after a delay of 1 ms, block 2 (1.12 ms: a delay of 100 µs,
+a pulse of 1 ms and the ringdown of 20 µs) and a delay of 2 ms. The block IDs are the
+pypulseq block numbers, from 1.
+
+#### `test_the_findings_of_each_error_type_have_the_data_of_the_record`
+
+**Checks:** For each of the error types BLOCK_DURATION_MISMATCH, RF_DEAD_TIME,
+RF_RINGDOWN_TIME, ADC_DEAD_TIME and POST_ADC_DEAD_TIME, the `data` of the finding has
+exactly the fields of the record of `check_timing`, except the block and the error type,
+with the expected values in seconds. Each value has the type `str`, `int`, `float`, `bool`
+or None, and not a NumPy type.
+
+**How:** The test runs `PYPULSEQ.run` with a `RunContext` on `error_sequence` read with
+`ERROR_OPTS`, and takes the first finding of each pair of block and code. It compares the
+data with the hand-computed values (to a relative 1e-9) and checks the types with
+`type(v) in (str, int, float, bool, NoneType)`, which a NumPy scalar does not satisfy.
+It also checks that the records of `check_timing` have NumPy types, so the conversion is
+needed.
+
+**Assumptions:** The values are the ones in the file, so they have the rounding of the
+`.seq` format; the relative tolerance covers it. The test does not make an error of the
+types NEGATIVE_DELAY and the soft delay types. A data value that is an `int` stays an
+`int`: no field of the five types is an `int`, so the test does not check this.
+
+#### `test_the_findings_of_a_raster_error_have_the_data_of_the_record`
+
+**Checks:** The three RASTER errors of `raster_error_sequence` give three findings with the
+code RASTER, in the order of the errors, in blocks 2, 2 and 3. Their `data` has the fields
+event, field, value, value_rounded, error and raster. The raster names are
+`block_duration_raster` for a block duration and `adc_raster_time` for an ADC dwell. The
+values of the dwell (20.0515 µs, 20.1 µs, -48.5 ns) and the block duration of block 3
+(1001.23 µs, 1000 µs, 1.23 µs) are the expected ones, and each value has a Python type.
+
+**How:** The test runs `PYPULSEQ.run` on the sequence in memory and compares the data with
+the expected values (to a relative 1e-6).
+
+**Assumptions:** The test does not check the data of the first finding (the block duration
+of block 2) except its event, field and raster.
+
+#### `test_the_message_of_a_finding_is_the_text_of_the_error_report_of_pypulseq`
+
+**Checks:** The message of each finding of `error_sequence` (nine findings of five types)
+is the text that `print_error_report` of pypulseq prints for the same error, in the same
+order, and the codes are the five types.
+
+**How:** The test calls `print_error_report(seq, errors, full_report=True, colored=False)`
+and reads the lines that start with `- ` with `capsys`. It compares them, as a list, with
+`- event.field: ` and the message of each finding.
+
+**Assumptions:** The report of pypulseq adds a line "Block n:" for each block, and a trace
+line when the sequence has a trace of the creation of the blocks. A sequence that is read
+from a file has none, so the only lines that start with `- ` are the error lines.
+
+#### `test_the_message_of_a_raster_finding_is_in_us_and_the_message_of_a_dwell_is_in_ns`
+
+**Checks:** The messages of the three RASTER findings of `raster_error_sequence` are the
+lines of the error report of pypulseq. The message of a block duration ends with ` us)` and
+the message of an ADC dwell ends with ` ns)` and has no ` us`.
+
+**How:** As in the test above, with the sequence in memory. Then the test checks the end of
+the first two messages.
+
+**Assumptions:** The unit of the report is "ns" for the field `dwell` and "us" for the
+others.
+
+#### `test_a_record_without_a_message_template_gives_the_fallback_message`
+
+**Checks:** A record with an error type that has no template (`NO_SUCH_TYPE`) gives the
+message `rf.delay: NO_SUCH_TYPE`. A record of the type RASTER that lacks the fields of the
+template gives `adc.dwell: RASTER`. In both cases the code is the error type, the location
+is block 2 at 1 ms, and the data are the fields event, field and value of the record.
+
+**How:** The test replaces `check_timing` of the sequence with a function that returns the
+record (monkeypatch) and runs `PYPULSEQ.run`. It checks the finding.
+
+**Assumptions:** The record is a `SimpleNamespace` of the same kind as the records of
+pypulseq. A template that fails for another reason (for example a zero division) goes
+through the same `except`; the test does not make it.
+
+#### `test_a_pass_has_no_findings`
+
+**Checks:** A sequence without timing errors gives "pass" with no findings and no omitted
+findings.
+
+**How:** The test runs `PYPULSEQ.run` on the file read with the `Opts` of the default
+target.
+
+**Assumptions:** None.
+
 #### `test_timing_pypulseq_is_not_evaluated_without_an_input`
 
 **Checks:** A target without one of the four rasters, the RF dead time, the RF ringdown or
@@ -4067,6 +4192,18 @@ the shapes.
 
 **Assumptions:** The test does not check the content of the texts, only that they are not
 empty. The cost classes are the ones of task 8.3 of the plan, from `scripts/budget.py`.
+
+#### `test_the_spec_of_timing_pypulseq_has_findings_and_keeps_version_1`
+
+**Checks:** The specification of `timing.pypulseq` has the version 1 and a `findings` text
+that is not empty and names each error type that pypulseq has a message template for. The
+specification of `timing.rasters` has no `findings` text.
+
+**How:** The test reads the fields of the two specifications, and checks the names of the
+keys of `error_messages` of pypulseq in the text.
+
+**Assumptions:** A newer pypulseq with another template needs a change of the text; the
+test finds it. The test does not check the other words of the text.
 
 #### `test_the_ids_and_inputs_of_the_specs`
 

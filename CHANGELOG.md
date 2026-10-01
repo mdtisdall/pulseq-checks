@@ -25,6 +25,14 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 - **The findings part of the summary**: when a result has findings, the summary
   has one count line for each of them. The part comes after "not evaluated and
   errors" and before the unused profile sections.
+- **`timing.pypulseq` gives its findings**: one finding for each error of
+  `check_timing`, in the play order of the blocks. The code is the error type.
+  The location is the block and its start time. `data` has the fields of the
+  error record. The message is the text of the error report of pypulseq. The
+  specification version stays 1, because the verdict does not change. On 10^6
+  blocks with 4 x 10^5 errors, the check takes 17.9 s instead of 15.3 s. The
+  JSON result with all findings is about 200 MB (0.5 MB with `--max-findings
+  1000`).
 
 ### Changed
 

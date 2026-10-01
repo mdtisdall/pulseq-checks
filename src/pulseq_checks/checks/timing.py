@@ -8,9 +8,10 @@ import math
 from typing import Any
 
 import numpy as np
+from pypulseq.check_timing import error_messages
 
 from ..profile import RASTER_OPTS
-from ..results import Location, Result, State
+from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
 from ..seq_index import block_cache_off, sequence_index
 
@@ -122,6 +123,44 @@ class _Rasters:
         return ctx.result(self.spec, state, value=declared, limit=target, unit="s", reason=detail)
 
 
+# The compiled message template of each error type. `format_string` of pypulseq compiles
+# `f"""<template>"""` again for each error, which took 6.9 s for 4 x 10^5 errors; compiled one
+# time for each type, the same texts took 0.5 s (plan check-findings, section 9.2).
+_MESSAGE_CODE: dict[str, Any] = {}
+
+
+def _finding_message(record: Any) -> str:
+    """The message of the finding of one record of `check_timing`: the text that
+    `print_error_report` of pypulseq makes for it (times in us, in ns for an ADC dwell),
+    without the "- event.field: " prefix. It evaluates the template as `format_string` of
+    pypulseq does. A type without a template, or a template that fails, gives
+    "<event>.<field>: <error_type>"."""
+    unit, multiplier = ("ns", 1e9) if getattr(record, "field", None) == "dwell" else ("us", 1e6)
+    try:
+        code = _MESSAGE_CODE.get(record.error_type)
+        if code is None:
+            template = error_messages[record.error_type]
+            code = compile(f'f"""{template}"""', "<pypulseq error message>", "eval")
+            _MESSAGE_CODE[record.error_type] = code
+        # The code is a template of pypulseq, not text of the file; the record fields are
+        # only its variables.
+        return eval(code, {**vars(record), "unit": unit, "multiplier": multiplier})
+    except Exception:  # noqa: BLE001 (the fallback text replaces a template that fails)
+        event = getattr(record, "event", "?")
+        field = getattr(record, "field", "?")
+        return f"{event}.{field}: {getattr(record, 'error_type', '?')}"
+
+
+def _finding_data(record: Any) -> dict[str, str | int | float | bool | None]:
+    """The attributes of one record of `check_timing`, except `block` and `error_type`, as
+    Python scalars (a NumPy scalar becomes the Python scalar of the same kind)."""
+    return {
+        name: value.item() if isinstance(value, np.generic) else value
+        for name, value in vars(record).items()
+        if name not in ("block", "error_type")
+    }
+
+
 class _Pypulseq:
     spec = CheckSpec(
         id="timing.pypulseq",
@@ -163,8 +202,9 @@ class _Pypulseq:
         pass_condition=(
             "Pass when check_timing gives no error. Fail when it gives one or more errors. "
             "The result location is the first error in the play order of the blocks: its "
-            "block ID, and the start time of that block in seconds. check_timing does not "
-            "change the sequence, except that it fills the block cache of the sequence "
+            "block ID, and the start time of that block in seconds. The result also gives each "
+            "error as a finding (see Findings). check_timing does not change the sequence, "
+            "except that it fills the block cache of the sequence "
             "object (a dictionary of the blocks that it read); this check turns the cache "
             "off, so that the other checks of the target see the same sequence, and a "
             "sequence of many blocks does not keep all its blocks in memory."
@@ -172,6 +212,30 @@ class _Pypulseq:
         cost="slow",
         pypulseq="Sequence.check_timing",
         url=None,
+        findings=(
+            "One finding for each error that check_timing gives, in the order of "
+            "check_timing (the play order of the blocks). The code is the error type of "
+            "check_timing: RASTER, BLOCK_DURATION_MISMATCH, NEGATIVE_DELAY, RF_DEAD_TIME, "
+            "RF_RINGDOWN_TIME, ADC_DEAD_TIME, POST_ADC_DEAD_TIME, SOFT_DELAY_FACTOR or "
+            "SOFT_DELAY_DUR_INCONSISTENCY. pypulseq also has a message template for "
+            "SOFT_DELAY_HINT_INCONSISTENCY and SOFT_DELAY_INVALID_NUMID, but the pinned "
+            "check_timing does not give these two types. The location is the block of the "
+            "error (its block ID) and the start time of that block, in seconds. The data are "
+            "the fields of the error record of check_timing, except the block and the type: "
+            "event and field (the names of the event and of the value in the block), value, "
+            "and the other fields of the type. All times are in seconds, except the factor "
+            "of SOFT_DELAY_FACTOR (its value), the hint and the numeric ID of the soft delay "
+            "types, and the name of the raster of RASTER (a text: for example "
+            "rf_raster_time). The "
+            "other fields are value_rounded and error (RASTER), duration (RF_RINGDOWN_TIME, "
+            "BLOCK_DURATION_MISMATCH and POST_ADC_DEAD_TIME), dead_time (RF_DEAD_TIME, "
+            "ADC_DEAD_TIME and POST_ADC_DEAD_TIME), ringdown_time (RF_RINGDOWN_TIME), and "
+            "hint and numID (the two soft delay types). The message is the text of the error "
+            "report of pypulseq for the error, with times in us, and in ns for an ADC dwell, "
+            "without the prefix of the event and the field. For an error type without a "
+            "template, or when the template fails, the message is the event, a point, the "
+            "field, a colon and the error type."
+        ),
     )
 
     def run(self, ctx: RunContext) -> Result:
@@ -181,12 +245,20 @@ class _Pypulseq:
         if not errors:
             return ctx.result(self.spec, State.PASS, value=0.0, limit=0.0)
         index = ctx.measure("index", sequence_index)
-        block = int(errors[0].block)
-        position = int(np.flatnonzero(index.block_id == block)[0])
-        location = Location(block=block, time_s=float(index.start_s[position]))
+        # One map for all errors: a sequence of 10^6 blocks can give 4 x 10^5 errors.
+        starts = dict(zip(index.block_id.tolist(), index.start_s.tolist(), strict=True))
+        findings = tuple(
+            Finding(
+                code=record.error_type,
+                message=_finding_message(record),
+                location=Location(block=int(record.block), time_s=starts[int(record.block)]),
+                data=_finding_data(record),
+            )
+            for record in errors
+        )
         first = errors[0]
         detail = (
-            f"first of {len(errors)} errors: block {block}, {first.event}.{first.field}: "
+            f"first of {len(errors)} errors: block {int(first.block)}, {first.event}.{first.field}: "
             f"{first.error_type}"
         )
         return ctx.result(
@@ -194,8 +266,9 @@ class _Pypulseq:
             State.FAIL,
             value=float(len(errors)),
             limit=0.0,
-            location=location,
+            location=findings[0].location,
             reason=detail,
+            findings=findings,
         )
 
 

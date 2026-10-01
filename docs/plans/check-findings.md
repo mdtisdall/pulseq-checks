@@ -3,9 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: phase 1 done, phase 2 not started (2026-09-30). The user approved
-the recommended answers of section 5. Section 9 records the changes to this
-plan during the work.
+Status: done (2026-09-30). Phase 1 is #20; phase 2 is its own PR. The user
+approved the recommended answers of section 5. Section 9 records the changes
+to this plan during the work, and the measurements.
 
 ## 1. Goal
 
@@ -414,7 +414,34 @@ decision about its specification version:
 - **Phase 1.** `CheckSpec.findings` is the last field of `CheckSpec`, after
   `url`, not after `pypulseq` (section 4.3). A plugin that gives the earlier
   fields by position keeps working.
+- **Phase 2.** The message of a timing finding uses the templates of
+  pypulseq (`error_messages`) as decision D5 says, but not `format_string`:
+  `format_string` compiles the template again for each error, which took
+  6.9 s of the 9.2 s that the findings added on 10⁶ blocks (section 9.2).
+  `checks/timing.py` compiles each template one time and evaluates it as
+  `format_string` does. The texts of the 4 × 10⁵ findings of section 9.2 are
+  the same as the texts of `format_string`.
 
-### 9.2 Measurements
+### 9.2 Measurements (task 2.2)
 
-Empty until phase 2 (task 2.2).
+Apple M1 Max, Python 3.12, pypulseq 1.5.0.post1. `build_repeating(200000)` of
+`tests/scale_sequences.py` (10⁶ blocks), against the profile of
+`scripts/budget.py` with `rf_ringdown_time = 30e-6` (the sequence uses
+20 µs): each TR gives one `RF_RINGDOWN_TIME` and one
+`BLOCK_DURATION_MISMATCH` error, 4 × 10⁵ errors. Each time is the median of 3
+runs, each in a fresh process: `run_checks(path, [profile],
+select=["timing.pypulseq"])`, with the read of the file. "Before" is `main`
+without phase 2.
+
+| | Before | After |
+|---|---|---|
+| `timing.pypulseq` | 15.3 s | 17.9 s (+16 %) |
+| Findings | 0 | 400 000 |
+| Peak RSS | 0.69 GB | 1.87 GB |
+| `to_json()`, all findings | | 4.5 s, 201.5 MB |
+| `from_json()` of that text | | 3.8 s |
+| `with_max_findings(1000).to_json()` | | 0.5 MB |
+
+With `format_string` for each message (section 9.1), the check took 24.6 s
+(+60 %). The JSON is larger than the estimate of section 2 (fact 3), because
+the messages of pypulseq are longer than the messages of that estimate.
