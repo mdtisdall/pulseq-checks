@@ -6,6 +6,10 @@ profile for each scanner. You get a result for each check and each target:
 pass, fail, not evaluated or error. The `pulseq-check` command gives an exit
 status for CI, and a Python function gives the same results as data.
 
+The measurement modules that the checks use are in the package
+[pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis), a dependency
+of `pulseq-checks`.
+
 There are no default limits. A check that needs a value that the profile does
 not give is "not evaluated". It is never a pass.
 
@@ -101,5 +105,5 @@ for result in matrix.results:
 - [`docs/usage.md`](docs/usage.md): the target profile, the check
   configuration, the command, the Python API, the result JSON, how to pass the
   findings to another tool, how to write a plugin check (also one that gives
-  findings), and the measurement modules that a check can use.
+  findings), and how a check uses the measurement modules of pulseq-analysis.
 - [`docs/checks.md`](docs/checks.md): the specification of each check.

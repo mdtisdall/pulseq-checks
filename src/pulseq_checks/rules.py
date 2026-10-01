@@ -8,8 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .grad_limits import HardwareLimits
-from .profile import RASTER_OPTS
+from .profile import RASTER_OPTS, HardwareLimits
 from .results import Result, State
 
 if TYPE_CHECKING:

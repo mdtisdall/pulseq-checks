@@ -6,8 +6,7 @@ import pytest
 from synthetic import spin_echo_sequence
 
 from pulseq_checks import registry
-from pulseq_checks.grad_limits import HardwareLimits
-from pulseq_checks.profile import TargetProfile
+from pulseq_checks.profile import HardwareLimits, TargetProfile
 from pulseq_checks.registry import RegistryError
 from pulseq_checks.results import Finding, Location, Result, State
 from pulseq_checks.rules import DOCS_URL, CheckSpec, RunContext, spec_url

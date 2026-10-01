@@ -13,9 +13,8 @@ missing `$INCLUDE` file, is an `OSError`."""
 import math
 from pathlib import Path
 
+from pulseq_analysis.asc import hardware_name, read_gradient_asc
 from pypulseq.utils.siemens.asc_to_hw import asc_to_hw
-
-from pulseq_checks.asc import hardware_name, read_gradient_asc
 
 _FIELDS = ("tau1", "tau2", "tau3", "a1", "a2", "a3", "stim_limit", "stim_thresh", "g_scale")
 # The mode names of the profile, and the names that the fields of the file use. "nominal" is

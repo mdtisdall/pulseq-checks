@@ -1,14 +1,15 @@
 """The check rule `pns.safe` (plan section 4.7): the peak of the SAFE PNS total of the
 whole sequence, with the SAFE parameters of the target profile. A fail also gives each interval
-of samples at or above 100 % as a finding (`PnsLevels.above_limit`)."""
+of samples at or above 100 % as a finding (`PnsLevels.above`)."""
 
 import numpy as np
+from pulseq_analysis.pns import pns_levels_for
+from pulseq_analysis.pns_levels import NO_GRADIENTS, PNS_LIMIT, PnsInterval
+from pulseq_analysis.seq_index import sequence_index
 
-from ..pns import pns_levels_for
-from ..pns_levels import NO_GRADIENTS, SAFE_MODEL, PnsInterval, hw_from_dict
 from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
-from ..seq_index import sequence_index
+from ..safe_model import SAFE_MODEL, hw_from_dict
 
 
 class _SafePns:
@@ -84,7 +85,7 @@ class _SafePns:
             limit=100.0,
             unit="%",
             location=self._location(ctx, levels.peak_time_s),
-            findings=self._findings(ctx, levels.above_limit),
+            findings=self._findings(ctx, levels.above[PNS_LIMIT]),
             **model,
         )
 
