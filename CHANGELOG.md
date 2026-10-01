@@ -55,6 +55,19 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   raster problem, also the mismatches of the other rasters. The location is
   none. The specification version stays 1, because the verdict does not
   change.
+- **The gradient checks give their findings**: `gradient.amplitude.axis`,
+  `gradient.slew.axis` and `gradient.amplitude.any-orientation` give one
+  finding for each block (and axis) that is above the limit, in the play order
+  of the blocks, then in the order of the axes x, y, z. The codes are
+  `AMPLITUDE_ABOVE_LIMIT`, `SLEW_ABOVE_LIMIT`, `JUNCTION_SLEW_ABOVE_LIMIT` (the
+  step at the start of the block, before the segment of the same block and
+  axis) and `VECTOR_AMPLITUDE_ABOVE_LIMIT`. The location is the block and the
+  time of the value, and `data` has the axis, the value and the limit. The
+  checks calculate the findings only for a fail, with
+  `grad_limits.block_gradient_values(seq, gamma=...)`, a new public function
+  that gives the gradient values of each block. The value, the limit, the
+  location and the state of each result do not change. The specification
+  version of each check stays 1, because the verdict does not change.
 
 ### Changed
 

@@ -4,12 +4,14 @@ import numpy as np
 import pypulseq as pp
 import pytest
 from oracles import grad_limits as oracle
+from scale_sequences import build_repeating, build_worst
 from synthetic import (
     RASTER_4US,
     RASTER_4US_JUNCTION,
     RASTER_4US_JUNCTION_TIME,
     SYSTEM,
     arbitrary_gradient_sequence,
+    border_sequence,
     empty_sequence,
     gre_sequence,
     raster_4us_sequence,
@@ -17,7 +19,12 @@ from synthetic import (
 )
 from test_extensions import _with_rotation_library
 
-from pulseq_checks.grad_limits import GradientLimits, gradient_limits
+from pulseq_checks.grad_limits import (
+    GradientLimits,
+    HardwareLimits,
+    block_gradient_values,
+    gradient_limits,
+)
 from pulseq_checks.seq_index import grad_events, sequence_index
 from pulseq_checks.seq_utils import GAMMA, gradient_offsets
 
@@ -754,3 +761,314 @@ def test_gradient_limits_refuses_rotations():
     stored."""
     with pytest.raises(NotImplementedError, match="rotation extension"):
         gradient_limits(_with_rotation_library())
+
+
+# ---- Values of each block (`block_gradient_values`) ----
+
+
+def _junction_sequence() -> pp.Sequence:
+    """Two x extended trapezoids with a step at their junction that is larger than every
+    segment's own slope: block 1 ends at `x`, block 2 starts at `x - step`."""
+    step = 0.9 * _MAX_STEP
+    x = 0.3 * SYSTEM.max_grad
+    seq = pp.Sequence(SYSTEM)
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x", times=[0.0, 100e-6, 200e-6], amplitudes=[0.0, x, x], system=SYSTEM
+        )
+    )
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x",
+            times=[0.0, 100e-6, 200e-6],
+            amplitudes=[x - step, x - step, 0.0],
+            system=SYSTEM,
+        )
+    )
+    return seq
+
+
+def _junction_and_segment_sequence() -> pp.Sequence:
+    """The junction of `_junction_sequence`, and a first segment of block 2 that changes by the
+    same step in one gradient raster: the junction step and that segment have the same slew."""
+    step = 0.9 * _MAX_STEP
+    x = 0.3 * SYSTEM.max_grad
+    seq = pp.Sequence(SYSTEM)
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x", times=[0.0, 100e-6, 200e-6], amplitudes=[0.0, x, x], system=SYSTEM
+        )
+    )
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x",
+            times=[0.0, _RASTER, 200e-6],
+            amplitudes=[x - step, x, x],
+            system=SYSTEM,
+        )
+    )
+    return seq
+
+
+def _gradient_ends_non_zero_before_delay_sequence() -> pp.Sequence:
+    last_value = 0.9 * _MAX_STEP
+    seq = pp.Sequence(SYSTEM)
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x",
+            times=[0.0, 100e-6, 200e-6],
+            amplitudes=[0.0, last_value, last_value],
+            system=SYSTEM,
+        )
+    )
+    seq.add_block(pp.make_delay(1e-3))
+    return seq
+
+
+def _first_block_starts_non_zero_sequence() -> pp.Sequence:
+    start_value = 0.9 * _MAX_STEP
+    seq = pp.Sequence(SYSTEM)
+    seq.add_block(
+        pp.make_extended_trapezoid(
+            channel="x",
+            times=[0.0, 100e-6, 200e-6],
+            amplitudes=[start_value, start_value, 0.0],
+            system=SYSTEM,
+        )
+    )
+    return seq
+
+
+def _assert_block_values_agree_with_gradient_limits(seq: pp.Sequence, gamma: float = GAMMA) -> None:
+    """The maximum of each value of `block_gradient_values` is the value of the whole file
+    in `gradient_limits`, and the first block with that value, with its time, is the block and
+    the time of `gradient_limits`. The arithmetic is the same, so every comparison is exact."""
+    values = block_gradient_values(seq, gamma=gamma)
+    whole = gradient_limits(seq, limits=HardwareLimits(1.0, 1.0, "any"), gamma=gamma)
+    assert values.block_id.size > 0
+    for axis in ("x", "y", "z"):
+        result = whole.axes[axis]
+
+        peak = values.peak_mt_per_m[axis]
+        top = float(peak.max())
+        assert top == result.peak_mt_per_m
+        if top > 0.0:
+            play = int(np.argmax(peak == top))
+            assert int(values.block_id[play]) == result.peak_block
+            assert values.peak_time_s[axis][play] == result.peak_time_s
+        else:
+            assert result.peak_block is None
+
+        segment = values.slew_t_per_m_per_s[axis]
+        junction = values.junction_t_per_m_per_s[axis]
+        combined = np.maximum(segment, junction)
+        top = float(combined.max())
+        assert top == result.max_slew_t_per_m_per_s
+        if top > 0.0:
+            play = int(np.argmax(combined == top))
+            assert int(values.block_id[play]) == result.slew_block
+            # The junction is at the block start, before every segment of the block.
+            time = values.start_s[play] if junction[play] == top else values.slew_time_s[axis][play]
+            assert time == result.slew_time_s
+        else:
+            assert result.slew_block is None
+
+    vector = values.vector_peak_mt_per_m
+    top = float(vector.max())
+    assert top == whole.vector_peak_mt_per_m
+    if top > 0.0:
+        play = int(np.argmax(vector == top))
+        assert int(values.block_id[play]) == whole.vector_peak_block
+        assert values.vector_peak_time_s[play] == whole.vector_peak_time_s
+    else:
+        assert whole.vector_peak_block is None
+
+
+_AGREEMENT_SEQUENCES = [
+    spin_echo_sequence,
+    gre_sequence,
+    empty_sequence,
+    arbitrary_gradient_sequence,
+    border_sequence,
+    raster_4us_sequence,
+    lambda: build_repeating(50),
+    lambda: build_worst(50),
+    _junction_sequence,
+    _junction_and_segment_sequence,
+    _gradient_ends_non_zero_before_delay_sequence,
+    _first_block_starts_non_zero_sequence,
+    *(
+        lambda seed=seed: _random_gradient_sequence(np.random.default_rng(seed))
+        for seed in range(20)
+    ),
+]
+_AGREEMENT_IDS = [
+    "spin_echo",
+    "gre",
+    "empty",
+    "arbitrary_gradient",
+    "border",
+    "raster_4us",
+    "build_repeating_50",
+    "build_worst_50",
+    "junction",
+    "junction_and_segment",
+    "ends_non_zero_before_delay",
+    "first_block_starts_non_zero",
+    *(f"random_{seed}" for seed in range(20)),
+]
+
+
+@pytest.mark.parametrize("make_seq", _AGREEMENT_SEQUENCES, ids=_AGREEMENT_IDS)
+def test_block_gradient_values_agree_with_gradient_limits_for_the_whole_file(make_seq):
+    """The maxima of `block_gradient_values` over the blocks are the whole-file values of
+    `gradient_limits`, with the same block and time."""
+    _assert_block_values_agree_with_gradient_limits(make_seq())
+
+
+def test_block_gradient_values_with_gamma_scale_the_values_as_gradient_limits_does():
+    seq = gre_sequence()
+    gamma = 40e6
+    scale = GAMMA / gamma
+
+    default = block_gradient_values(seq)
+    result = block_gradient_values(seq, gamma=gamma)
+
+    assert default.vector_peak_mt_per_m.max() > 0.0
+    np.testing.assert_allclose(
+        result.vector_peak_mt_per_m, default.vector_peak_mt_per_m * scale, rtol=1e-12
+    )
+    for axis in ("x", "y", "z"):
+        np.testing.assert_allclose(
+            result.peak_mt_per_m[axis], default.peak_mt_per_m[axis] * scale, rtol=1e-12
+        )
+        np.testing.assert_allclose(
+            result.slew_t_per_m_per_s[axis], default.slew_t_per_m_per_s[axis] * scale, rtol=1e-12
+        )
+        np.testing.assert_allclose(
+            result.junction_t_per_m_per_s[axis],
+            default.junction_t_per_m_per_s[axis] * scale,
+            rtol=1e-12,
+        )
+        np.testing.assert_array_equal(result.peak_time_s[axis], default.peak_time_s[axis])
+    _assert_block_values_agree_with_gradient_limits(seq, gamma=gamma)
+
+
+def test_block_without_an_event_on_an_axis_has_zero_values_and_its_start_as_time():
+    """Block 1 has x and y gradients, block 2 only z, block 3 none: an axis without an event
+    in a block has a peak, a slew and a junction step of 0 there, and the block start as the
+    time. A block without gradients has vector peak 0 at its start. The values of the axes with
+    an event are hand-computed from the trapezoids."""
+    mg = SYSTEM.max_grad
+    gy = pp.make_trapezoid(
+        channel="y", amplitude=0.25 * mg, rise_time=100e-6, flat_time=200e-6, system=SYSTEM
+    )
+    seq = pp.Sequence(SYSTEM)
+    seq.add_block(_tie_trapezoid("x"), gy)  # x: 0.5 * mg, rise 0.2 ms
+    seq.add_block(_tie_trapezoid("z"))
+    seq.add_block(pp.make_delay(1e-3))
+
+    values = block_gradient_values(seq)
+
+    start_s = sequence_index(seq).start_s
+    assert values.peak_mt_per_m["x"][0] == pytest.approx(0.5 * mg / GAMMA * 1e3)
+    assert values.peak_time_s["x"][0] == pytest.approx(200e-6)
+    assert values.slew_t_per_m_per_s["x"][0] == pytest.approx(0.5 * mg / 200e-6 / GAMMA)
+    assert values.peak_mt_per_m["y"][0] == pytest.approx(0.25 * mg / GAMMA * 1e3)
+    assert values.peak_mt_per_m["z"][1] == pytest.approx(0.5 * mg / GAMMA * 1e3)
+    assert values.peak_time_s["z"][1] == pytest.approx(start_s[1] + 200e-6)
+    for axis, plays in (("x", [1, 2]), ("y", [1, 2]), ("z", [0, 2])):
+        for play in plays:
+            assert values.peak_mt_per_m[axis][play] == 0.0
+            assert values.slew_t_per_m_per_s[axis][play] == 0.0
+            assert values.junction_t_per_m_per_s[axis][play] == 0.0
+            assert values.peak_time_s[axis][play] == start_s[play]
+            assert values.slew_time_s[axis][play] == start_s[play]
+    # Block 1: |G| is largest at 0.2 ms, where x has finished its rise and y is on its flat top.
+    assert values.vector_peak_mt_per_m[0] == pytest.approx(math.hypot(0.5, 0.25) * mg / GAMMA * 1e3)
+    assert values.vector_peak_time_s[0] == pytest.approx(200e-6)
+    assert values.vector_peak_mt_per_m[1] == pytest.approx(0.5 * mg / GAMMA * 1e3)
+    assert values.vector_peak_mt_per_m[2] == 0.0
+    assert values.vector_peak_time_s[2] == start_s[2]
+
+
+def test_first_block_junction_step_uses_zero_before_the_block():
+    """A first block whose gradient starts at a non-zero value: its junction step on that axis
+    is that value divided by the gradient raster, and the other axes have 0."""
+    start_value = 0.9 * _MAX_STEP
+
+    values = block_gradient_values(_first_block_starts_non_zero_sequence())
+
+    assert values.junction_t_per_m_per_s["x"][0] == pytest.approx(start_value / _RASTER / GAMMA)
+    assert values.junction_t_per_m_per_s["y"][0] == 0.0
+    assert values.junction_t_per_m_per_s["z"][0] == 0.0
+
+
+def test_junction_step_is_at_the_start_of_the_block_after_the_junction():
+    """Block 1 ends at `x`, block 2 starts at `x - step` and ends at 0, and block 3 has no
+    gradient: the step is in block 2 and is 0 in block 1 (0 before it) and in block 3 (it
+    follows a block that ends at 0). A gradient that ends at a non-zero value before a block
+    without a gradient gives that value as the step of the block after it."""
+    step = 0.9 * _MAX_STEP
+    seq = _junction_sequence()
+    seq.add_block(pp.make_delay(1e-3))
+
+    values = block_gradient_values(seq)
+
+    np.testing.assert_array_equal(values.junction_t_per_m_per_s["x"][[0, 2]], [0.0, 0.0])
+    assert values.junction_t_per_m_per_s["x"][1] == pytest.approx(step / _RASTER / GAMMA)
+
+    last_value = 0.9 * _MAX_STEP
+    after_delay = block_gradient_values(_gradient_ends_non_zero_before_delay_sequence())
+    assert after_delay.junction_t_per_m_per_s["x"][0] == 0.0
+    assert after_delay.junction_t_per_m_per_s["x"][1] == pytest.approx(last_value / _RASTER / GAMMA)
+
+
+def test_junction_step_and_segment_of_one_block_with_the_same_slew_give_the_junction_time():
+    """A junction step and the first segment of the same block have the same slew, and it is
+    the largest of the file: `gradient_limits` gives the start of the block, the time of the
+    junction, and `block_gradient_values` has the same slew for both in that block."""
+    seq = _junction_and_segment_sequence()
+    _block_1_id, block_2_id = seq.block_events
+
+    values = block_gradient_values(seq)
+
+    assert values.junction_t_per_m_per_s["x"][1] == values.slew_t_per_m_per_s["x"][1]
+    assert values.junction_t_per_m_per_s["x"][1] == values.slew_t_per_m_per_s["x"].max()
+    result = gradient_limits(seq).axes["x"]
+    assert result.slew_block == block_2_id
+    assert result.slew_time_s == values.start_s[1]
+    assert result.max_slew_t_per_m_per_s == values.junction_t_per_m_per_s["x"][1]
+
+
+def test_block_gradient_values_are_in_play_order_with_one_entry_for_each_block():
+    seq = gre_sequence(num_trs=3)
+    index = sequence_index(seq)
+
+    values = block_gradient_values(seq)
+
+    assert index.num_blocks > 3
+    np.testing.assert_array_equal(values.block_id, index.block_id)
+    np.testing.assert_array_equal(values.start_s, index.start_s)
+    arrays = [values.vector_peak_mt_per_m, values.vector_peak_time_s]
+    for field in (
+        values.peak_mt_per_m,
+        values.peak_time_s,
+        values.slew_t_per_m_per_s,
+        values.slew_time_s,
+        values.junction_t_per_m_per_s,
+    ):
+        assert list(field) == ["x", "y", "z"]
+        arrays.extend(field.values())
+    assert len(arrays) == 17
+    for array in arrays:
+        assert array.shape == (index.num_blocks,)
+        assert array.dtype == np.float64
+    assert np.all(np.diff(values.start_s) > 0.0)
+
+
+def test_block_gradient_values_refuses_rotations():
+    """`block_gradient_values` raises `NotImplementedError` for a sequence with a rotation
+    library, as `gradient_limits` does."""
+    with pytest.raises(NotImplementedError, match="rotation extension"):
+        block_gradient_values(_with_rotation_library())

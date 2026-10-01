@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import Any
 
+import numpy as np
 import pypulseq as pp
 import pytest
 from pypulseq.event_lib import EventLibrary
@@ -159,6 +160,11 @@ CASES = [
     ),
 ]
 CASE_IDS = [case.check.spec.id for case in CASES]
+FINDING_CODES = {
+    AMPLITUDE_AXIS: ("AMPLITUDE_ABOVE_LIMIT",),
+    SLEW_AXIS: ("SLEW_ABOVE_LIMIT", "JUNCTION_SLEW_ABOVE_LIMIT"),
+    AMPLITUDE_ANY_ORIENTATION: ("VECTOR_AMPLITUDE_ABOVE_LIMIT",),
+}
 
 
 def detail(case):
@@ -566,6 +572,9 @@ def test_the_spec_sets_each_field(check):
     for text in (spec.title, spec.quantity, spec.limit, spec.tolerance, spec.pass_condition):
         assert isinstance(text, str)
         assert text.strip()
+    assert isinstance(spec.findings, str)
+    for code in FINDING_CODES[check]:
+        assert code in spec.findings
 
 
 @pytest.mark.parametrize(
@@ -650,3 +659,297 @@ def test_a_raster_that_the_file_does_not_declare_comes_from_the_target(
     for check_id in ("gradient.amplitude.axis", "gradient.amplitude.any-orientation"):
         assert results[check_id].state is State.PASS
         assert results[check_id].value == pytest.approx(16.0, rel=1e-4)
+
+
+# ---- The findings ----
+
+
+def findings_sequence() -> pp.Sequence:
+    """Five blocks (IDs 1 to 5; the trapezoid of each has the rise time RISE, so the slew of
+    x mT/m is 10 * x T/m/s):
+    1: x at 30. 2: a delay. 3: y at 10. 4: x at 25 and y at 40. 5: z at 22 and x at 5.
+    With the limit 20 mT/m (200 T/m/s), block 3 and the x of block 5 are below the limit, and
+    block 4 has two axes above it. |G| is 30, 10, hypot(25, 40) and hypot(22, 5) mT/m."""
+    return build(
+        (trap("x", 30),),
+        (pp.make_delay(DELAY),),
+        (trap("y", 10),),
+        (trap("x", 25), trap("y", 40)),
+        (trap("z", 22), trap("x", 5)),
+    )
+
+
+# The start of each block of `findings_sequence`, in seconds.
+START_1 = 0.0
+START_3 = TRAPEZOID + DELAY
+START_4 = START_3 + TRAPEZOID
+START_5 = START_4 + TRAPEZOID
+
+# For each check, the findings of `findings_sequence` with the limit of 20 mT/m (200 T/m/s):
+# (code, block, time_s, the data of the axis and the value).
+FINDINGS_EXPECTED = {
+    AMPLITUDE_AXIS: [
+        ("AMPLITUDE_ABOVE_LIMIT", 1, START_1 + RISE, "x", 30.0),
+        ("AMPLITUDE_ABOVE_LIMIT", 4, START_4 + RISE, "x", 25.0),
+        ("AMPLITUDE_ABOVE_LIMIT", 4, START_4 + RISE, "y", 40.0),
+        ("AMPLITUDE_ABOVE_LIMIT", 5, START_5 + RISE, "z", 22.0),
+    ],
+    SLEW_AXIS: [
+        ("SLEW_ABOVE_LIMIT", 1, START_1, "x", 300.0),
+        ("SLEW_ABOVE_LIMIT", 4, START_4, "x", 250.0),
+        ("SLEW_ABOVE_LIMIT", 4, START_4, "y", 400.0),
+        ("SLEW_ABOVE_LIMIT", 5, START_5, "z", 220.0),
+    ],
+    AMPLITUDE_ANY_ORIENTATION: [
+        ("VECTOR_AMPLITUDE_ABOVE_LIMIT", 1, START_1 + RISE, None, 30.0),
+        ("VECTOR_AMPLITUDE_ABOVE_LIMIT", 4, START_4 + RISE, None, math.hypot(25, 40)),
+        ("VECTOR_AMPLITUDE_ABOVE_LIMIT", 5, START_5 + RISE, None, math.hypot(22, 5)),
+    ],
+}
+FINDINGS_CASES = [
+    (AMPLITUDE_AXIS, "max_grad", 20.0, "mT/m"),
+    (SLEW_AXIS, "max_slew", 200.0, "T/m/s"),
+    (AMPLITUDE_ANY_ORIENTATION, "max_grad", 20.0, "mT/m"),
+]
+FINDINGS_IDS = [check.spec.id for check, *_ in FINDINGS_CASES]
+
+
+def findings_profile(key: str, limit: float, **opts) -> TargetProfile:
+    """A target with `limit` for the limit `key` and FAR for the other."""
+    return make_profile(**{"max_grad": FAR, "max_slew": FAR, key: limit}, **opts)
+
+
+def spy_on_block_gradient_values(monkeypatch) -> list[dict]:
+    """Replace `block_gradient_values` in the check module with a function that calls the real
+    one and keeps the keyword arguments of each call; returns that list."""
+    calls: list[dict] = []
+    real = gradient_module.block_gradient_values
+
+    def spy(seq, **kwargs):
+        calls.append(kwargs)
+        return real(seq, **kwargs)
+
+    monkeypatch.setattr(gradient_module, "block_gradient_values", spy)
+    return calls
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_a_pass_has_no_findings_and_does_not_measure_the_blocks(
+    monkeypatch, check, key, limit, unit
+):
+    calls = spy_on_block_gradient_values(monkeypatch)
+    profile = findings_profile(key, 3 * limit)
+    ctx = RunContext(findings_sequence(), profile, hardware_limits=profile.hardware_limits)
+
+    result = check.run(ctx)
+
+    assert result.state is State.PASS
+    assert result.findings == ()
+    assert calls == []
+    assert "gradient_limits" in ctx._measurements
+    assert "gradient_blocks" not in ctx._measurements
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_a_fail_has_one_finding_for_each_block_and_axis_above_the_limit_in_order(
+    check, key, limit, unit
+):
+    result = run_one(check, findings_sequence(), findings_profile(key, limit))
+
+    assert result.state is State.FAIL
+    expected = FINDINGS_EXPECTED[check]
+    assert len(result.findings) == len(expected)
+    for finding, (code, block, time_s, axis, value) in zip(result.findings, expected, strict=True):
+        assert finding.code == code
+        assert finding.location is not None
+        assert finding.location.block == block
+        assert finding.location.time_s == pytest.approx(time_s, abs=1e-9)
+        value_key = "value_t_per_m_per_s" if unit == "T/m/s" else "value_mt_per_m"
+        limit_key = "limit_t_per_m_per_s" if unit == "T/m/s" else "limit_mt_per_m"
+        assert set(finding.data) == ({"axis"} if axis else set()) | {value_key, limit_key}
+        assert finding.data.get("axis") == axis
+        assert finding.data[value_key] == pytest.approx(value)
+        assert finding.data[limit_key] == limit
+        axis_text = f"axis {axis}: " if axis else ""
+        what = "segment slew " if check is SLEW_AXIS else ("|G| " if axis is None else "")
+        assert finding.message == f"{axis_text}{what}{value:.4g} {unit}, limit {limit:.4g} {unit}"
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_the_data_of_a_finding_are_python_scalars(check, key, limit, unit):
+    result = run_one(check, findings_sequence(), findings_profile(key, limit))
+
+    for finding in result.findings:
+        assert type(finding.location.block) is int
+        assert type(finding.location.time_s) is float
+        for name, value in finding.data.items():
+            assert type(value) in (str, float), name
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_a_fail_measures_the_blocks_one_time_for_each_target_and_does_not_change_the_result(
+    monkeypatch, check, key, limit, unit
+):
+    calls = spy_on_block_gradient_values(monkeypatch)
+    seq = findings_sequence()
+    profile = findings_profile(key, limit)
+    ctx = RunContext(seq, profile, hardware_limits=profile.hardware_limits)
+
+    result = check.run(ctx)
+    again = check.run(ctx)
+
+    assert len(calls) == 1
+    assert calls[0] == {"gamma": GAMMA}
+    assert result.findings == again.findings
+    # The value, the limit, the location and the reason are the ones that the same run gives
+    # for a limit that this sequence does not reach (the measurement does not change).
+    reference = run_one(check, seq, findings_profile(key, FAR))
+    assert result.value == reference.value
+    assert result.limit == limit
+    assert result.unit == unit
+    assert result.location == reference.location
+    assert result.reason == reference.reason
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_the_worst_finding_is_the_value_and_the_location_of_the_result(check, key, limit, unit):
+    result = run_one(check, findings_sequence(), findings_profile(key, limit))
+
+    value_key = "value_t_per_m_per_s" if unit == "T/m/s" else "value_mt_per_m"
+    worst = max(result.findings, key=lambda finding: finding.data[value_key])
+    assert worst.data[value_key] == result.value
+    assert worst.location == result.location
+    # No finding is below the limit.
+    assert all(finding.data[value_key] > limit for finding in result.findings)
+
+
+@pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)
+def test_a_block_within_the_tolerance_of_the_limit_has_no_finding(check, key, limit, unit):
+    """Block 1 has x at 20 mT/m, block 2 x at 30. The limit is the value of block 1 divided by
+    1 + 5e-10: block 1 is above the limit but within the tolerance, so only block 2 gives a
+    finding."""
+    case = next(c for c in CASES if c.check is check)
+    value = run_one(check, build((trap("x", 20),)), profile_for(case, FAR)).value
+    seq = build((trap("x", 20),), (trap("x", 30),))
+
+    result = run_one(check, seq, profile_for(case, value / (1 + 5e-10)))
+
+    assert result.state is State.FAIL
+    assert [finding.location.block for finding in result.findings] == [2]
+
+
+def test_a_value_that_is_not_a_number_is_above_the_limit():
+    """The rule of the state and of the findings is "not at or below the limit": a value that
+    is not a number fails, as it did before the findings, and is a finding."""
+    limit = 80.0
+    values = np.array([math.nan, limit, limit * (1 + 5e-10), limit * (1 + 2e-9)])
+    assert gradient_module._above_limit(values, limit).tolist() == [True, False, False, True]
+    assert bool(gradient_module._above_limit(math.nan, limit)) is True
+
+
+def junction_and_segment_sequence() -> pp.Sequence:
+    """Two x extended trapezoids on the system SYSTEM (limit 150 T/m/s). Block 1 ends at 8.4
+    mT/m. Block 2 starts 0.9 * 150 T/m/s * one gradient raster lower, and its first segment
+    goes back to 8.4 mT/m in one gradient raster: the step at the start of block 2 and its first
+    segment have the slew 135 T/m/s (the slew of block 1 is 84 T/m/s)."""
+    raster = SYSTEM.grad_raster_time
+    step = 0.9 * SYSTEM.max_slew * raster
+    x = 0.3 * SYSTEM.max_grad
+    return build(
+        (
+            pp.make_extended_trapezoid(
+                channel="x", times=[0.0, 100e-6, 200e-6], amplitudes=[0.0, x, x], system=SYSTEM
+            ),
+        ),
+        (
+            pp.make_extended_trapezoid(
+                channel="x",
+                times=[0.0, raster, 200e-6],
+                amplitudes=[x - step, x, x],
+                system=SYSTEM,
+            ),
+        ),
+        system=SYSTEM,
+    )
+
+
+def gradient_ends_non_zero_before_delay_sequence() -> pp.Sequence:
+    """Block 1 ends at 0.9 * 150 T/m/s * one gradient raster. Block 2 is a delay: the step at
+    its start is 135 T/m/s, and no segment is above 100 T/m/s."""
+    last_value = 0.9 * SYSTEM.max_slew * SYSTEM.grad_raster_time
+    seq = build(
+        (
+            pp.make_extended_trapezoid(
+                channel="x",
+                times=[0.0, 100e-6, 200e-6],
+                amplitudes=[0.0, last_value, last_value],
+                system=SYSTEM,
+            ),
+        ),
+        (pp.make_delay(1e-3),),
+        system=SYSTEM,
+    )
+    return seq
+
+
+def test_a_junction_step_and_a_segment_of_the_same_block_give_two_findings_the_step_first():
+    profile = make_profile(max_grad=FAR, max_slew=100.0)
+
+    result = run_one(SLEW_AXIS, junction_and_segment_sequence(), profile)
+
+    assert result.state is State.FAIL
+    junction, segment = result.findings
+    assert (junction.code, segment.code) == ("JUNCTION_SLEW_ABOVE_LIMIT", "SLEW_ABOVE_LIMIT")
+    for finding, what in ((junction, "step at the block start"), (segment, "segment slew")):
+        assert finding.location.block == 2
+        assert finding.location.time_s == pytest.approx(200e-6, abs=1e-9)
+        assert finding.data["axis"] == "x"
+        assert finding.data["value_t_per_m_per_s"] == pytest.approx(135.0)
+        assert finding.data["limit_t_per_m_per_s"] == 100.0
+        assert finding.message == f"axis x: {what} 135 T/m/s, limit 100 T/m/s"
+    assert result.value == pytest.approx(135.0)
+    assert result.location.block == 2
+
+
+def test_a_step_before_a_block_with_no_gradient_gives_a_finding_at_the_start_of_that_block():
+    profile = make_profile(max_grad=FAR, max_slew=100.0)
+
+    result = run_one(SLEW_AXIS, gradient_ends_non_zero_before_delay_sequence(), profile)
+
+    (finding,) = result.findings
+    assert finding.code == "JUNCTION_SLEW_ABOVE_LIMIT"
+    assert finding.location.block == 2
+    assert finding.location.time_s == pytest.approx(200e-6, abs=1e-9)
+    assert finding.data["axis"] == "x"
+    assert finding.data["value_t_per_m_per_s"] == pytest.approx(135.0)
+
+
+@pytest.mark.parametrize(
+    ("check", "key", "limit", "unit"),
+    [
+        (AMPLITUDE_AXIS, "max_grad", 20.0, "mT/m"),
+        (SLEW_AXIS, "max_slew", 200.0, "T/m/s"),
+        (AMPLITUDE_ANY_ORIENTATION, "max_grad", 20.0, "mT/m"),
+    ],
+    ids=FINDINGS_IDS,
+)
+def test_a_profile_with_another_gamma_gives_findings_in_the_units_of_the_result(
+    check, key, limit, unit
+):
+    """Gamma 40 MHz/T and a 21 mT/m gradient (840 kHz/m, slew 210 T/m/s) against the limits 20
+    mT/m and 200 T/m/s: with 42.576 MHz/T the value would be 19.7 mT/m and pass."""
+    system = pp.Opts(
+        max_grad=100, grad_unit="mT/m", max_slew=1000, slew_unit="T/m/s", gamma=GAMMA_40
+    )
+    gx = pp.make_trapezoid(
+        channel="x", amplitude=21e-3 * GAMMA_40, rise_time=RISE, flat_time=FLAT, system=system
+    )
+    seq = build((gx,), system=system)
+
+    result = run_one(check, seq, findings_profile(key, limit, gamma=GAMMA_40))
+
+    assert result.state is State.FAIL
+    (finding,) = result.findings
+    value_key = "value_t_per_m_per_s" if unit == "T/m/s" else "value_mt_per_m"
+    assert finding.data[value_key] == result.value
+    assert finding.data[value_key] == pytest.approx(210.0 if unit == "T/m/s" else 21.0)

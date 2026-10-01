@@ -23,6 +23,10 @@ junction divided by the gradient raster of the sequence, `seq.grad_raster_time` 
 use the times of the file, and `Sequence.add_block` checked this step against the raster that
 built the file. The step uses 0 for a block with no event on the axis, and 0 before the first
 block.
+
+`block_gradient_values` gives the same measurements for each block of the whole file, in play
+order, instead of the one largest value for each axis that `gradient_limits` gives. It is for a
+caller that needs each place where a value is above a limit. `gradient_limits` does not call it.
 """
 
 import math
@@ -110,6 +114,43 @@ class GradientLimits:
     vector_peak_block: int | None
     limits: HardwareLimits
     whole_rms_mt_per_m: dict[str, float] | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class BlockGradientValues:
+    """The gradient values of each block of a sequence, from `block_gradient_values`.
+
+    Each array has one entry for each block, in play order (`seq_index.SequenceIndex`); N is
+    the number of blocks. `block_id` is the block ID and `start_s` the start of the block in
+    seconds from the sequence start. The four dicts have the keys "x", "y" and "z", and each
+    value is a float array of length N. For an axis that has no event in a block, the peak and
+    the slew are 0 and their times are `start_s`; the junction step is the step from the last
+    value of the previous block to 0, which is not 0 when the previous block ends at a value
+    that is not 0.
+
+    `peak_mt_per_m` is the largest absolute amplitude of the block's event on the axis, and
+    `peak_time_s` its time. `slew_t_per_m_per_s` is the largest slope of a straight segment of
+    that event, and `slew_time_s` the start of that segment. `junction_t_per_m_per_s` is the
+    step at the start of the block, `|last value of the previous block - first value of this
+    block|` divided by `seq.grad_raster_time`, as the module docstring describes it (0 for
+    the first block). Its time is `start_s`. `vector_peak_mt_per_m` is the largest magnitude
+    of the three-axis vector in the block, and `vector_peak_time_s` the first time in the block
+    where it is reached (0 and `start_s` for a block without gradients).
+
+    The maximum of each of these over the blocks is the value that `gradient_limits` gives for
+    the whole file. The first block with that value is its credited block, and for the slew
+    the junction step of a block comes before the segments of that block.
+    """
+
+    block_id: np.ndarray
+    start_s: np.ndarray
+    peak_mt_per_m: dict[str, np.ndarray]
+    peak_time_s: dict[str, np.ndarray]
+    slew_t_per_m_per_s: dict[str, np.ndarray]
+    slew_time_s: dict[str, np.ndarray]
+    junction_t_per_m_per_s: dict[str, np.ndarray]
+    vector_peak_mt_per_m: np.ndarray
+    vector_peak_time_s: np.ndarray
 
 
 def _default_limits(seq: pp.Sequence, gamma: float) -> HardwareLimits:
@@ -619,4 +660,94 @@ def gradient_limits(
         vector_peak_block=vector_peak_block,
         limits=limits,
         whole_rms_mt_per_m=whole_rms_mt_per_m,
+    )
+
+
+def _event_column(col: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """For each block, the entry of `values` (K entries, one for each unique gradient event) of
+    the block's event on one axis, and 0.0 for a block without an event on it. `col` is the
+    dense event column of that axis (`seq_index.SequenceIndex.gx`/`gy`/`gz`, 0 = no event)."""
+    return np.concatenate(([0.0], values))[col]
+
+
+def _block_vector_peaks(index: SequenceIndex, ev: _EventData) -> tuple[np.ndarray, np.ndarray]:
+    """The peak of |G| of each block in Hz/m, and its time from the block start, from
+    `_triple_vector_peak` one time for each distinct triple of dense event indexes
+    (`np.unique` over the blocks that have a gradient, mapped back to every such block). A
+    block without a gradient has 0 and 0."""
+    peak = np.zeros(index.num_blocks)
+    offset = np.zeros(index.num_blocks)
+    gx, gy, gz = (col.astype(np.int64) for col in (index.gx, index.gy, index.gz))
+    selected = np.flatnonzero((gx > 0) | (gy > 0) | (gz > 0))
+    if selected.size == 0:
+        return peak, offset
+    gx, gy, gz = gx[selected], gy[selected], gz[selected]
+    # The triple as one number, in two steps so that it stays far from the int64 limit.
+    base = ev.peak.size + 1
+    _, pair = np.unique(gx * base + gy, return_inverse=True)
+    _, first, inverse = np.unique(
+        pair.astype(np.int64) * base + gz, return_index=True, return_inverse=True
+    )
+    triple_peak = np.zeros(first.size)
+    triple_offset = np.zeros(first.size)
+    for t, local in enumerate(first.tolist()):
+        triple = _triple_vector_peak(ev, int(gx[local]), int(gy[local]), int(gz[local]))
+        if triple is not None:
+            triple_offset[t], triple_peak[t] = triple
+    peak[selected] = triple_peak[inverse]
+    offset[selected] = triple_offset[inverse]
+    return peak, offset
+
+
+def block_gradient_values(seq: pp.Sequence, *, gamma: float = GAMMA) -> BlockGradientValues:
+    """The gradient values of each block of `seq`, in play order (`BlockGradientValues`).
+
+    These are the values that `gradient_limits` takes the largest of for the whole file, kept
+    for each block: the peak amplitude and the peak slew of the block's event on each logical
+    axis, the junction step at the start of the block, and the peak of the three-axis vector.
+    The slope and the junction step follow the rules of the module docstring.
+
+    `gamma` (Hz/T) converts the values from Hz/m (Hz/m/s) to mT/m (T/m/s), as it does for
+    `gradient_limits`. The default is 42.576 MHz/T.
+
+    This builds `seq_index.sequence_index(seq)` and the per-event values of
+    `seq_index.grad_events` one time (`_event_values`), then combines them with numpy over the
+    blocks. It computes the peak of |G| one time for each distinct triple of events. It does
+    not read a block with `get_block`.
+
+    Raises NotImplementedError for a sequence with the rotation extension
+    (`extensions.refuse_rotations`): the values are of the logical axes as they are stored.
+    """
+    refuse_rotations(seq)
+    index = sequence_index(seq)
+    ev = _event_values(seq, index)
+    grad_raster = seq.grad_raster_time
+    start_s = index.start_s
+
+    peak_mt_per_m: dict[str, np.ndarray] = {}
+    peak_time_s: dict[str, np.ndarray] = {}
+    slew_t_per_m_per_s: dict[str, np.ndarray] = {}
+    slew_time_s: dict[str, np.ndarray] = {}
+    junction_t_per_m_per_s: dict[str, np.ndarray] = {}
+    for axis, col in zip(_AXES, (index.gx, index.gy, index.gz), strict=True):
+        peak_mt_per_m[axis] = _event_column(col, ev.peak) / gamma * 1e3
+        peak_time_s[axis] = start_s + _event_column(col, ev.peak_offset)
+        slew_t_per_m_per_s[axis] = _event_column(col, ev.slew) / gamma
+        slew_time_s[axis] = start_s + _event_column(col, ev.slew_offset)
+        first_vals = _event_column(col, ev.first)
+        last_vals = _event_column(col, ev.last)
+        prev_last = np.concatenate(([0.0], last_vals[:-1]))
+        junction_t_per_m_per_s[axis] = np.abs(prev_last - first_vals) / grad_raster / gamma
+
+    vector_peak_hz, vector_offset = _block_vector_peaks(index, ev)
+    return BlockGradientValues(
+        block_id=index.block_id.astype(np.int64),
+        start_s=start_s.copy(),
+        peak_mt_per_m=peak_mt_per_m,
+        peak_time_s=peak_time_s,
+        slew_t_per_m_per_s=slew_t_per_m_per_s,
+        slew_time_s=slew_time_s,
+        junction_t_per_m_per_s=junction_t_per_m_per_s,
+        vector_peak_mt_per_m=vector_peak_hz / gamma * 1e3,
+        vector_peak_time_s=start_s + vector_offset,
     )
