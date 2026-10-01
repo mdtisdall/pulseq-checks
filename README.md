@@ -57,9 +57,44 @@ evaluated, 2 when a check failed, and 1 for an error. The profile has no SAFE
 parameters, so `pns.safe` is "not evaluated": it does not change the status,
 because the command did not name it.
 
+## All the errors of a check
+
+A result gives the worst value of a check. It can also have findings: one for
+each problem that the check found, with a code, a message, the block and the
+time, and the values. `timing.pypulseq` gives one finding for each error of
+pypulseq's `check_timing`. A plugin check can give its own.
+
+The summary on the console gives only the number of findings of each result.
+To see them there, add `--show-findings`. To pass them to another tool, write
+the JSON result, which has all of them:
+
+```
+pulseq-check scan.seq --target prisma.toml --json result.json
+pulseq-check scan.seq --target prisma.toml --json - | next-tool
+```
+
+With `--json -` the JSON goes to the standard output and the summary to the
+standard error. `--max-findings N` keeps the first `N` findings of each
+result, and the result records how many it omitted.
+
+In Python, each result has its findings:
+
+```python
+from pulseq_checks import read_profile, run_checks
+
+matrix = run_checks("scan.seq", [read_profile("prisma.toml")])
+for result in matrix.results:
+    for finding in result.findings:
+        print(result.check_id, finding.code, finding.location, finding.message)
+```
+
+`matrix.to_json()` gives the same JSON as the command, and
+`ResultMatrix.from_json(text)` reads it again.
+
 ## Documents
 
 - [`docs/usage.md`](docs/usage.md): the target profile, the check
-  configuration, the command, the Python API, the result JSON and how to write
-  a plugin check.
+  configuration, the command, the Python API, the result JSON, how to pass the
+  findings to another tool, and how to write a plugin check (also one that
+  gives findings).
 - [`docs/checks.md`](docs/checks.md): the specification of each check.

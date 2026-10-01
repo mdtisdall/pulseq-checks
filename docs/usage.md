@@ -53,6 +53,22 @@ check uses a model), and the reason. The reason says why a result is "not
 evaluated" or "error". For a pass or a fail it can give a short detail of the
 value, for example the axis (`axis y`) or the raster that gave it.
 
+### Findings
+
+A result can also have findings: one finding for each problem that the check
+found, not only the worst value. Each finding has a code (the kind of
+problem), a message for a person, a location (the block ID and the time in
+seconds) and data (the values of the problem, by name). `timing.pypulseq`
+gives one finding for each error of `check_timing` of pypulseq. The other
+checks of this package give no findings. A plugin check can give its own
+([section 7](#a-check-rule)). The specification of a check in
+[`checks.md`](checks.md) says what its findings are.
+
+The findings do not change the state of a result or the exit status. The
+summary of the command gives only the number of findings of each result. The
+JSON result has all of them. To pass them to another tool, see
+[Passing the findings to another tool](#passing-the-findings-to-another-tool).
+
 ### No default limits
 
 There are no default limits. A value that the profile does not give is not
@@ -511,7 +527,9 @@ the summary, which goes to the standard output (to the standard error only with
 findings do not change the exit status: a result with findings has the state
 that the check gave it. To get all findings with no change to the console
 output, write `--json FILE`. The file has all findings of each result, unless
-you also give `--max-findings`.
+you also give `--max-findings`. [Passing the findings to another
+tool](#passing-the-findings-to-another-tool) shows how a different tool reads
+them.
 
 A required check has `*` in the first column. When a result is "not
 evaluated" or "error", a block `not evaluated and errors:` follows the table
@@ -822,6 +840,82 @@ named as required:
 The exit status of this run is 2: one check failed, and no required check was
 "not evaluated". `pns.safe` is not required.
 
+### Passing the findings to another tool
+
+The JSON result is the output that carries the findings to the next tool. The
+console output stays short: the summary has only a count line for each result
+with findings. Write the result to a file:
+
+```
+pulseq-check spin_echo.seq --target prisma.toml --json result.json
+```
+
+or to the standard output, for a pipe. Then the summary goes to the standard
+error, so the next tool gets only the JSON:
+
+```
+pulseq-check spin_echo.seq --target prisma.toml --json - | next-tool
+```
+
+For the spin echo of [section 4](#the-summary), the result of
+`timing.pypulseq` has four findings. The first one is:
+
+```json
+{
+  "code": "BLOCK_DURATION_MISMATCH",
+  "message": "Inconsistency between the stored block duration (1120.00 us) and the content of the block (1130.00 us)",
+  "location": {
+    "block": 1,
+    "time_s": 0.0
+  },
+  "data": {
+    "event": "block",
+    "field": "duration",
+    "value": 0.0011300000000000001,
+    "duration": 0.0011200000000000001
+  }
+}
+```
+
+The `data` of a finding are in SI units (here seconds). The `message` gives
+the same values for a person. The specification of the check in
+[`checks.md`](checks.md) gives its codes and the keys of its `data`.
+
+A tool that does not use `pulseq-checks` reads the JSON directly. With `jq`,
+one line for each finding:
+
+```
+jq -r '.results[] | .check_id as $c | .findings[] | [$c, .code, .location.block, .message] | @tsv' result.json
+```
+
+With Python and no other package:
+
+```python
+import json
+
+with open("result.json") as f:
+    result = json.load(f)
+for r in result["results"]:
+    for finding in r["findings"]:
+        print(r["check_id"], finding["code"], finding["location"]["block"])
+    if r["findings_omitted"]:
+        print(r["check_id"], r["findings_omitted"], "findings omitted")
+```
+
+A Python tool that uses `pulseq-checks` reads the file with
+`ResultMatrix.from_json(Path("result.json").read_text())`. It gets each
+finding as a `Finding` ([section 5](#finding)), and `from_json` refuses a text
+with a missing or an unknown key. A program that runs the checks itself gives
+the matrix to the next tool with `matrix.to_json()`.
+
+A sequence with many errors can give many findings: on 10⁶ blocks with an
+error in each TR, `timing.pypulseq` gives 4 × 10⁵ findings, and the JSON
+result is about 200 MB. `--max-findings N` (or
+`ResultMatrix.with_max_findings(N)` in Python) keeps the first `N` findings of
+each result. The number of the others is in `findings_omitted`, so the next
+tool knows that the list is not complete. With `--max-findings 1000`, the same
+result is 0.5 MB.
+
 ## 7. Writing a plugin
 
 A package can add checks, models and profile readers. Each is an object that
@@ -905,10 +999,13 @@ first. Give your own measurement a name of your own (for example
 would take the limits of `seq.system`.
 
 An example: a check of a fixed limit on the duration of a block. The limit is
-a part of the specification, so `inputs` is empty.
+a part of the specification, so `inputs` is empty. The result gives the
+longest block, and one finding for each block that is too long.
 
 ```python
-from pulseq_checks import CheckSpec, Location, Result, RunContext, State
+import numpy as np
+
+from pulseq_checks import CheckSpec, Finding, Location, Result, RunContext, State
 from pulseq_checks.seq_index import sequence_index
 
 MAX_BLOCK_S = 0.1
@@ -927,18 +1024,40 @@ class _BlockDuration:
         pass_condition="Pass when the longest block is at most 0.1 s.",
         cost="fast",
         url="https://example.org/site-checks/block-duration",
+        findings=(
+            "One finding for each block that is longer than 0.1 s, in the play order of "
+            "the blocks. The code is BLOCK_TOO_LONG. The location is the block and its "
+            "start time. data has duration_s: the duration of the block, in seconds."
+        ),
     )
 
     def run(self, ctx: RunContext) -> Result:
         index = ctx.measure("index", sequence_index)
         if index.num_blocks == 0:
             return ctx.result(self.spec, State.PASS, value=0.0, limit=MAX_BLOCK_S, unit="s")
+        findings = []
+        for i in np.flatnonzero(index.duration_s > MAX_BLOCK_S):
+            block, duration = int(index.block_id[i]), float(index.duration_s[i])
+            findings.append(
+                Finding(
+                    code="BLOCK_TOO_LONG",
+                    message=f"block {block} lasts {duration:g} s",
+                    location=Location(block=block, time_s=float(index.start_s[i])),
+                    data={"duration_s": duration},
+                )
+            )
         i = int(index.duration_s.argmax())
         value = float(index.duration_s[i])
         location = Location(block=int(index.block_id[i]), time_s=float(index.start_s[i]))
         state = State.PASS if value <= MAX_BLOCK_S else State.FAIL
         return ctx.result(
-            self.spec, state, value=value, limit=MAX_BLOCK_S, unit="s", location=location
+            self.spec,
+            state,
+            value=value,
+            limit=MAX_BLOCK_S,
+            unit="s",
+            location=location,
+            findings=tuple(findings),
         )
 
 
@@ -952,32 +1071,30 @@ Register it in the `pyproject.toml` of the plugin package:
 "site.block-duration" = "site_checks.blocks:BLOCK_DURATION"
 ```
 
-A check rule gives its findings with the argument `findings`, a tuple of
-`Finding` ([section 5](#finding)):
+A rule gives its findings with the argument `findings` of `ctx.result`: a
+tuple of `Finding` ([section 5](#finding)), in a fixed order. A result of any
+state can have findings, and they do not change the state. The rule gives all
+of its findings and does not set `findings_omitted`: the command and
+`ResultMatrix.with_max_findings` set it when they remove findings. The rule
+must document its findings in `CheckSpec.findings`: what one finding is, its
+codes, its location, the keys of `data` and the order of the findings. A value
+of `data` must be a `str`, `int`, `float`, `bool` or `None`. A NumPy integer
+is not an `int`: convert each NumPy value with `int(x)` or `float(x)`, as the
+example does.
 
-```python
-return ctx.result(
-    self.spec,
-    State.FAIL,
-    value=value,
-    limit=MAX_BLOCK_S,
-    unit="s",
-    findings=(
-        Finding(
-            code="BLOCK_TOO_LONG",
-            message=f"block {block} lasts {value:g} s",
-            location=Location(block=block, time_s=start_s),
-            data={"duration_s": value},
-        ),
-    ),
-)
+With a sequence of four delays of 0.05, 0.2, 0.01 and 0.15 s, the summary of
+this check with `--show-findings` is:
+
+```text
+results (* = required):
+    state  check                target       value                detail
+    fail   site.block-duration  Prisma AS82  0.2 s (limit 0.1 s)
+
+findings:
+  site.block-duration, target Prisma AS82: 2 findings
+    block 2 at 0.05 s: BLOCK_TOO_LONG: block 2 lasts 0.2 s
+    block 4 at 0.26 s: BLOCK_TOO_LONG: block 4 lasts 0.15 s
 ```
-
-A result of any state can have findings, and they do not change the state. The
-rule gives all of its findings and does not set `findings_omitted`: the command
-and `ResultMatrix.with_max_findings` set it when they remove findings. The
-rule must document its findings in `CheckSpec.findings`: what one finding is,
-its codes, its location, the keys of `data` and the order of the findings.
 
 To test a rule alone, make `RunContext(sequence, profile)` and call
 `rule.run(ctx)`. The run function gives the "not evaluated" and "error"
@@ -1023,6 +1140,10 @@ reader.
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
+- **Findings from one check only.** Only `timing.pypulseq` gives findings.
+  The other checks give their worst value and its location only. The checks
+  that can give findings later are in [`TODO.md`](../TODO.md). A plugin check
+  can give findings now ([section 7](#a-check-rule)).
 - **No convention checks** (handedness, axis mapping), and no worst-case slew
   under rotation. They come later.
 - **No JUnit output.**
