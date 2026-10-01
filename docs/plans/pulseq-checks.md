@@ -223,7 +223,9 @@ specification of each check gives:
 
 The message of a result gives the ID, so that a reader can find the
 specification. The specification has a version. When a rule changes, its
-version changes, so that old CI results stay clear.
+version changes, so that old CI results stay clear. This starts with the
+first final release (0.1.0). In the release candidates, each specification
+is version 1, and a change of a rule is in the changelog only.
 
 ### 5.5 What pulseq-reports needs from this package
 

@@ -176,7 +176,7 @@ class _AmplitudeAxis(_GradientCheck):
 class _SlewAxis(_GradientCheck):
     spec = CheckSpec(
         id="gradient.slew.axis",
-        version=2,
+        version=1,
         title="Peak gradient slew rate of each logical axis",
         quantity=(
             "For each logical axis x, y and z, the peak slew rate in T/m/s: the largest of two "

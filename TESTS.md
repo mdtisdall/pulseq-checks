@@ -4360,8 +4360,8 @@ later pypulseq that stores a rotation in another way (see `refuse_rotations`).
 
 #### `test_the_spec_sets_each_field`
 
-**Checks:** For each of the three rules, the `CheckSpec` has the expected ID, the version
-(2 for the slew rule, 1 for the other two), cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
+**Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
+cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
 rule, `opts.max_grad` for the other two), and a non-empty title, quantity, limit,
 tolerance and pass condition.
 
