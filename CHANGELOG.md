@@ -146,6 +146,18 @@ three gradient checks in each TR, the fast checks take 7.63 s
   junction steps 2.5 times too small. A difference between the rasters of the
   file and of the target is the subject of `timing.rasters`.
 
+### Documentation
+
+- **The measurement modules**: `docs/usage.md` has a new section 8 with the
+  interface of `seq_index`, `grad_limits`, `pns`, `pns_levels`, `sampling`,
+  `seq_utils`, `asc` and `extensions`: the fields and units of
+  `SequenceIndex`, `GradientLimits`, `AxisResult`, `BlockGradientValues`,
+  `PnsLevels` and `PnsInterval`, and the rules that all the measurements
+  follow. A name that the section does not give can change in any release.
+  "Limits of version 1" is now section 9. The docstrings of these modules no
+  longer point to design documents and code of pulseq-reports, which are not
+  in this repository.
+
 ## 0.1.0rc1 (2026-09-30)
 
 The first release candidate: version 1 of `docs/plans/pulseq-checks.md`,

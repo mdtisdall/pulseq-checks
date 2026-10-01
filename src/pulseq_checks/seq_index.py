@@ -3,8 +3,10 @@
 `sequence_index` reads `seq.block_events` and `seq.block_durations` one column at a
 time, without `get_block`, so it costs O(N) for N blocks with no per-block pypulseq
 call. It numbers the unique RF, gradient and ADC events from 1, in the order of their
-first use in play order. The diagram tables and the analyses use these numbers. The three
-gradient axes share one index space: in one block, gx comes before gy and gz.
+first use in play order. The three gradient axes share one index space: in one block, gx
+comes before gy and gz. The measurements use these numbers to compute a value one time
+for each unique event, not one time for each block, and then give it to each block that
+plays the event.
 
 `rf_events`, `grad_events` and `adc_events` give each unique event one time, from the
 first block that uses it. Only they call `get_block`, with the block cache off
@@ -61,8 +63,8 @@ _CACHE: "weakref.WeakKeyDictionary[pp.Sequence, tuple[int, int, SequenceIndex]]"
 def sequence_index(seq: pp.Sequence) -> SequenceIndex:
     """The `SequenceIndex` of `seq`.
 
-    The result is kept for the sequence object, so that several cards on one page
-    build it one time. It is built again when the number of blocks or the last block id
+    The result is kept for the sequence object, so that several measurements of one
+    sequence build it one time. It is built again when the number of blocks or the last block id
     changed, for example after `add_block`. A change that keeps both (a block replaced
     in place) is not seen: build a new sequence object for it.
     """
@@ -108,6 +110,8 @@ def _dense(columns: list[np.ndarray]) -> tuple[list[np.ndarray], np.ndarray]:
 
 
 def _build_index(seq: pp.Sequence) -> SequenceIndex:
+    """The `SequenceIndex` of `seq`, built from `seq.block_events` and `seq.block_durations`
+    without the cache of `sequence_index`."""
     block_events = seq.block_events
     n = len(block_events)
     block_id = np.fromiter(block_events.keys(), dtype=np.uint32, count=n)

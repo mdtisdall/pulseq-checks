@@ -5,8 +5,8 @@ sequence: the reason, hardware and asc-file fields, and the summary fields of
 `pns_levels.pns_levels`, cached one time for each (sequence object, gradient .asc file) by
 `pns_levels_for`. `pns_levels_for` is the one place that runs the SAFE model
 (`pns_levels.pns_levels`, which uses the pinned pypulseq fork's chunk function), so a
-page that has both the PNS summary card and the diagram's PNS lane for one sequence
-computes it once (`docs/plans/diagram-lanes.md`, section 4.6).
+caller that needs both the summary and the level of one sequence (a report that shows the
+PNS peak and draws the PNS over time, for example) runs the model one time.
 
 The model needs the scanner's gradient hardware parameters, which Siemens keeps in the
 gradient system's .asc file (MP_GPA_*.asc, or MP_GradSys_*.asc on newer software). The
@@ -29,10 +29,10 @@ from .seq_index import sequence_index
 
 @dataclass(frozen=True)
 class PnsPrediction:
-    """The PNS summary of one sequence (`pns_prediction`). Summary-only: a caller that
-    wants the samples of a short sequence can call `seq.calculate_pns` directly (the
-    pinned fork's memory is near the size of its result), or use `pns_levels_for` for
-    the stored level (`docs/plans/diagram-lanes.md`, section 7, question 1)."""
+    """The PNS summary of one sequence (`pns_prediction`): the fields of
+    `pns_levels.PnsLevels` without the level and the intervals. A caller that wants the
+    samples of a short sequence can call `seq.calculate_pns` directly (the pinned fork's
+    memory is near the size of its result), or use `pns_levels_for` for the level."""
 
     reason: str | None  # why there is no prediction, or None
     hardware: str  # the hardware name in the .asc file, or asc.EXAMPLE_HARDWARE
@@ -105,9 +105,10 @@ def pns_levels_for(
 
 def pns_prediction(seq: pp.Sequence, *, gradient_asc: str | Path | None = None) -> PnsPrediction:
     """The SAFE PNS summary for `seq`, with the hardware in the .asc file `gradient_asc`, or
-    pypulseq's example hardware when it is None. Built from `pns_levels_for`, so a page
-    that also draws the PNS lane of the diagram for `seq` (`cards.diagram.diagram_card`)
-    does not run the SAFE model twice."""
+    pypulseq's example hardware when it is None. Built from `pns_levels_for`, so a caller
+    that also uses `pns_levels_for` for `seq` and the same hardware does not run the SAFE
+    model twice. The checks of this package do not use this function: `pns.safe` calls
+    `pns_levels_for` with the hardware of the target profile."""
     levels = pns_levels_for(seq, gradient_asc=gradient_asc)
     return PnsPrediction(
         reason=levels.reason,
@@ -124,9 +125,8 @@ def peak_tr_window(seq: pp.Sequence, peak_time_s: float | None) -> tuple[float, 
     sequence start in steps of the TR definition. None without a TR definition, or when
     the sequence is not longer than one TR.
 
-    `peak_time_s` is in seconds, for example `PnsPrediction.peak_time_s`. A caller adds
-    this window to the diagram card's windows for a "TR with the highest PNS" button
-    (`docs/plans/diagram-lanes.md`, section 4.6), without a dependency on the PNS card."""
+    `peak_time_s` is in seconds, for example `PnsPrediction.peak_time_s`. A caller that
+    draws the sequence can use this window to show the TR with the highest PNS."""
     tr = seq.definitions.get("TR")
     if tr is None or peak_time_s is None:
         return None

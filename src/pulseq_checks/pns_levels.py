@@ -1,15 +1,25 @@
-"""The PNS total of a whole sequence as a stored level: the minimum and the maximum in
-fixed time bins, and the summary (section 4.1, item 2, and section 4.2 of
-docs/plans/diagram-lanes.md).
+"""The SAFE PNS prediction of a whole sequence: the summary (the peak, its time and the
+peak of each axis), the intervals at or above the stimulation limit, and the level.
+
+The level is the minimum and the maximum of the PNS total in fixed time bins. It is for a
+caller that draws the PNS of a long sequence (pulseq-reports, for example) and cannot keep
+one value for each sample. The checks of this package use the summary and the intervals,
+not the level.
 
 `pns_levels` samples the gradients block by block (`GradientSampler.block_samples`),
 runs the SAFE model of the pinned pypulseq fork over them in chunks
 (`_safe_gwf_to_pns_chunk`, which carries the filter state from one chunk to the next),
-and keeps only the stored level and the summary. Its memory does not grow with the
-duration of the sequence, except for the stored level (at most `MAX_BINS` bins).
+and keeps only the level, the summary and the intervals. Its memory does not grow with
+the duration of the sequence, except for the level (at most `MAX_BINS` bins) and the
+intervals.
 
-The browser's `PnsLanes` (assets/pns_lanes.js) computes the same samples for its exact
-views, so the stored level and the exact views agree to float rounding.
+The samples of each block start at the start of that block, not at a time summed over the
+earlier blocks. Thus a block gives the same samples wherever it is in the sequence, and
+a drawing tool that samples one block with the same rule gets the same values.
+
+The module also has the SAFE model of the target profile (`SAFE_MODEL`, for
+`[models.pns.safe]`) and `hw_from_dict`, which makes the hardware argument of
+`pns_levels` from the parameters of that model.
 """
 
 import math
@@ -22,9 +32,8 @@ import numpy as np
 import pypulseq as pp
 
 # The chunk function of the pypulseq fork (TODO.md, "Move from the pypulseq fork to a
-# pypulseq release"). It is private in the
-# fork, so that the upstream proposal adds no public name: decision 11 of
-# docs/plans/diagram-lanes.md. This is the only module that imports it.
+# pypulseq release"). The fork keeps it private, so that the proposal to upstream
+# pypulseq adds no public name. This is the only module that imports it.
 from pypulseq.utils.safe_pns_prediction import _safe_gwf_to_pns_chunk, safe_example_hw
 from pypulseq.utils.siemens.asc_to_hw import asc_to_hw
 
@@ -33,18 +42,18 @@ from .extensions import refuse_rotations
 from .sampling import GradientSampler, raster_block_lengths
 from .seq_index import sequence_index
 
-# The longest exact view of the browser (`PnsLanes.EXACT_MAX_S`), in s. The finest stored
-# bin is at most half a display bin at this view (section 4.2, decision 13). Keep the two
-# equal.
+# The finest bin of the level (`bin_samples_for`): a plot of `EXACT_MAX_S` seconds that is
+# `DISPLAY_BINS` columns wide has at least two bins in each column, so that a plot of
+# that duration or longer can be drawn from the level. A shorter plot needs the samples
+# themselves. The two values are those of the PNS plot of pulseq-reports (a 10 s view,
+# 812 columns wide). They change only the bin size, not the summary or the intervals.
 EXACT_MAX_S = 10.0
-# The number of display bins of the diagram chart: `PLOT_W` of `assets/lane_chart.js`
-# (960 - 128 - 20). Keep the two equal.
 DISPLAY_BINS = 812
-# The largest number of stored bins for one file (section 4.2).
+# The largest number of bins of the level for one file. It limits the memory of the level
+# to 16 MB (two float32 arrays) for any duration: a longer file gets longer bins.
 MAX_BINS = 2_000_000
-# The fork's chunk size (samples): smaller chunks add time, larger ones add memory
-# (section 2.6, item 4). A chunk of `pns_levels` is the whole number of bins nearest
-# above it.
+# The fork's chunk size (samples): smaller chunks add time, larger ones add memory. A
+# chunk of `pns_levels` is the whole number of bins nearest at or above it.
 CHUNK_SAMPLES = 30_000
 NO_GRADIENTS = "no gradients"
 # Samples within this fraction of the peak count as the peak. Identical TRs differ only by
@@ -70,6 +79,24 @@ class PnsInterval:
 
 @dataclass(frozen=True)
 class PnsLevels:
+    """The result of `pns_levels` (and of `pns.pns_levels_for`) for one sequence and one
+    hardware.
+
+    A PNS value is a fraction of the stimulation limit: 1 is 100 %, the limit of `pns.safe`.
+    The value of an axis is the SAFE model output of that logical axis. The total of a
+    sample is `sqrt(x^2 + y^2 + z^2)` of the axis values. Sample `k` is at the time
+    `(k + 0.5) * dt_s`, in seconds from the start of the sequence.
+
+    `peak`, `peak_time_s`, `axis_peaks` and `above_limit` are the summary. `level_min` and
+    `level_max` are the level: bin `i` holds the samples `i * bin_samples` to
+    `(i + 1) * bin_samples - 1` (the last bin can have fewer), and every total of those
+    samples is in `[level_min[i], level_max[i]]`.
+
+    Without a gradient event in the sequence, `reason` is `NO_GRADIENTS`, `num_samples` is
+    0, the level has no bins, `peak` and each axis peak are 0, `peak_time_s` is None and
+    `above_limit` is empty.
+    """
+
     reason: str | None  # why there is no prediction (NO_GRADIENTS), or None
     hardware: str  # the hardware name in the .asc file, asc.EXAMPLE_HARDWARE, or the label
     # of the `hardware` argument of `pns_levels`
@@ -79,7 +106,7 @@ class PnsLevels:
     # stim_limit, g_scale, as pypulseq's hardware namespace has them
     dt_s: float  # the gradient raster
     num_samples: int  # the number of samples of the whole sequence
-    bin_samples: int  # samples in each stored bin (section 4.2)
+    bin_samples: int  # samples in each bin of the level (`bin_samples_for`)
     level_min: np.ndarray  # float32, one for each bin: the minimum of the total
     level_max: np.ndarray  # float32, one for each bin: the maximum of the total
     peak: float  # the largest total; 1 is the stimulation limit
@@ -92,9 +119,11 @@ class PnsLevels:
 
 
 def bin_samples_for(num_samples: int, dt: float) -> int:
-    """`max(floor(EXACT_MAX_S / (2 * DISPLAY_BINS) / dt), ceil(num_samples / MAX_BINS))`,
-    and at least 1 (section 4.2). 615 at the 10 us raster for a file of up to
-    1,230,000,000 samples."""
+    """The number of samples in each bin of the level:
+    `max(floor(EXACT_MAX_S / (2 * DISPLAY_BINS) / dt), ceil(num_samples / MAX_BINS))`, and
+    at least 1. The first term is the finest bin (see `EXACT_MAX_S`), the second keeps the
+    level at `MAX_BINS` bins or fewer. 615 at the 10 us raster for a file of up to
+    1,230,000,000 samples (3.4 hours)."""
     finest = math.floor(EXACT_MAX_S / (2 * DISPLAY_BINS) / dt)
     coarsest_for_size = math.ceil(num_samples / MAX_BINS)
     return max(finest, coarsest_for_size, 1)
@@ -227,8 +256,9 @@ def pns_levels(
     state = None
     peak = 0.0
     axis_peak = np.zeros(3, dtype=np.float64)
-    # The start state and the float64 maximum of each chunk (item 5): enough to run
-    # again only the one chunk that holds the peak, instead of keeping every sample.
+    # The start state and the float64 maximum of each chunk (item 5 of `pns_levels`):
+    # enough to run again only the one chunk that holds the peak, instead of keeping every
+    # sample.
     chunk_records: list[tuple[int, object, float]] = []
     intervals = _IntervalFinder(dt)
 
@@ -415,7 +445,7 @@ def _store_bins(
 ) -> int:
     """Stores the minimum and the maximum of `total` (float64) in consecutive bins of
     `bin_samples` samples of `level_min`/`level_max`, starting at `bin_cursor`, cast
-    outward to float32 (item 4). Only the last bin of `total` can be shorter than
+    outward to float32 (item 4 of `pns_levels`). Only the last bin of `total` can be shorter than
     `bin_samples`: `pns_levels` builds every chunk except the last as a whole number of
     bins, so no bin crosses a chunk. Returns the new bin cursor."""
     chunk_len = total.shape[0]
@@ -450,7 +480,7 @@ def _cast_outward(values: np.ndarray, *, down: bool) -> np.ndarray:
     return cast
 
 
-# ---- The SAFE model of the profile (section 4.9) ----
+# ---- The SAFE model of the target profile (`[models.pns.safe]`, docs/usage.md) ----
 
 # The nine fields of each axis of a SAFE hardware struct, in the order of
 # `safe_example_hw` and `asc_to_hw`. `pns.pns_levels_for` keys its results on them too.

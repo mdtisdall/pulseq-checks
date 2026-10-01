@@ -13,16 +13,20 @@ an oblique slice one physical axis can see amplitude up to the vector peak,
 
 This computes the per-event values one time for each unique gradient event
 (`seq_index.grad_events`), then combines them over the blocks of `seq_index.sequence_index`
-with numpy, instead of reading every block with `get_block` (`docs/plans/cards-at-scale.md`,
-section 4.6). It reads individual blocks only for the few blocks that a window edge cuts.
+with numpy, instead of reading every block with `get_block`. Thus its cost grows with the
+number of unique events and the number of blocks, but it makes no pypulseq call for each
+block. It reads individual blocks only for the few blocks that a window edge cuts.
 
-The peak slew rate is the largest of two kinds of value (decision 6 of section 2.5 of the
-plan): the slope of each straight segment of each gradient event, and the step at each block
-junction divided by the gradient raster of the sequence, `seq.grad_raster_time` (the
+The peak slew rate is the largest of two kinds of value: the slope of each straight segment
+of each gradient event, and the step at each block junction divided by the gradient raster
+of the sequence, `seq.grad_raster_time` (the
 `GradientRasterTime` that the file declares), not the raster of `seq.system`. The segment slopes
 use the times of the file, and `Sequence.add_block` checked this step against the raster that
 built the file. The step uses 0 for a block with no event on the axis, and 0 before the first
-block.
+block. A step at a junction is a change of the gradient within one raster time on the
+scanner, so it is a slew like the slope of a segment. A junction step is legal in Pulseq
+(`Sequence.add_block` accepts one up to `max_slew * grad_raster_time`), so a sequence can
+have its largest slew there.
 
 `block_gradient_values` gives the same measurements for each block of the whole file, in play
 order, instead of the one largest value for each axis that `gradient_limits` gives. It is for a
@@ -46,8 +50,10 @@ _AXES = ("x", "y", "z")
 class HardwareLimits:
     """The gradient hardware limits that a sequence is compared with.
 
-    `label` is shown in the report, for example "pypulseq system limits" or a name for
-    a specific scanner and gradient coil.
+    `max_grad_mt_per_m` is in mT/m and `max_slew_t_per_m_per_s` in T/m/s. `label` names
+    the limits, for example "pypulseq system limits" (the limits of `seq.system`) or the
+    name of a target profile. The numbers of `gradient_limits` do not depend on `limits`:
+    it only gives them back in `GradientLimits.limits`, so that a caller can compare.
     """
 
     max_grad_mt_per_m: float
@@ -102,8 +108,7 @@ class GradientLimits:
 
     `whole_rms_mt_per_m` is the RMS amplitude of each axis (mT/m) over the whole sequence,
     computed in the same call that computes `axes`, so that a caller that wants both the
-    window's values and the whole file's RMS (as the gradient limits card does) needs only one
-    call. It is None when `window` was None (then `axes`' own RMS already is the whole file's).
+    window's values and the whole file's RMS needs only one call. It is None when `window` was None (then `axes`' own RMS already is the whole file's).
     """
 
     reason: str | None
@@ -466,7 +471,7 @@ def _range_result(
                     axis_points_by_play[play] = axis_points
 
     # The vector peak of |G|: the distinct triples of the "fully inside" range, one
-    # _triple_vector_peak call for each (section 4.6, item 3), plus the edge blocks' own
+    # _triple_vector_peak call for each, plus the edge blocks' own
     # clipped points, exactly as the oracle computes them.
     vector_peak_hz, vector_peak_time, vector_peak_play = 0.0, 0.0, None
     k = ev.peak.size
@@ -498,7 +503,7 @@ def _range_result(
         if _credit_goes_to(block_peak, play, vector_peak_hz, vector_peak_play):
             vector_peak_hz, vector_peak_time, vector_peak_play = block_peak, block_time, play
 
-    # The junction steps (decision 6 of section 2.5): for each axis, the step at the
+    # The junction steps (see the module docstring): for each axis, the step at the
     # incoming junction of each processed block that starts at or after the range
     # start (0 before the very first block of the file, or where either side has no
     # event on the axis). The junction of a block that the range start cuts is before
