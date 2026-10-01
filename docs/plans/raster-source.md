@@ -3,10 +3,8 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: draft (2026-09-30). The user approved D1 and D4 of section 5.
-Phase 1 needs only these two decisions, so it can start. Do not start
-phase 2 before the approval of D5, or phase 3 before the approval of D2
-and D3.
+Status: approved (2026-09-30). The user approved all the decisions of
+section 5. Do the phases in the order of section 7.
 
 ## 1. Goal
 
@@ -257,15 +255,15 @@ This changes `rules.py`, `run.py` and `scripts/check_docs.py`. The branch
 `feature/check-findings` (phase 1 of `docs/plans/check-findings.md`) changes
 the same files now. Start this phase after that branch merges.
 
-## 5. Decisions (the user must approve them)
+## 5. Decisions (approved 2026-09-30)
 
 | # | Decision | Recommendation | Alternatives |
 |---|---|---|---|
 | D1 | The raster of the junction step | Decided (2026-09-30): (a), the file raster, `seq.grad_raster_time` (option (a) of the report). It is the raster that built the waveform and that `add_block` used. It needs no new input. `pns_levels` uses the same raster. R6 (design section 5.10) says that the rasters of the file must equal the rasters of the target, and `timing.rasters` fails a file with different rasters. Thus (a) and (b) give the same value when `timing.rasters` passes. They give different values only when the profile has no `[rasters]` or when the rasters are different (R1). Then (a) gives the slew of the waveform of the file, and only `timing.rasters` reports the different rasters. | (b) The target raster: add `rasters.GradientRasterTime` to the inputs, and say "of the target" in the quantity. Then a profile without `[rasters]` gives "not evaluated", and the value describes a play of the file that design section 5.10 does not define. |
-| D2 | A raster that the file does not declare | Section 4.3: a raster of the target replaces it (as the interpreter of the target does for an old file), and a pypulseq default makes the check "not evaluated". | (b) Make every gradient check and `pns.safe` list `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` as inputs. Simple, but then a profile without `[rasters]` never gets these checks, also for a file that declares its rasters. (c) Do nothing, and document R2 as a known limit. |
-| D3 | The rasters of each check (section 4.3, item 4) | Both rasters for all four checks. The amplitude value of an arbitrary gradient does not depend on the raster, but its location time does. | Only `GradientRasterTime` for `gradient.slew.axis` and `pns.safe`. |
+| D2 | A raster that the file does not declare | Decided (2026-09-30): section 4.3. A raster of the target replaces it (as the interpreter of the target does for an old file), and a pypulseq default makes the check "not evaluated". | (b) Make every gradient check and `pns.safe` list `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` as inputs. Simple, but then a profile without `[rasters]` never gets these checks, also for a file that declares its rasters. (c) Do nothing, and document R2 as a known limit. |
+| D3 | The rasters of each check (section 4.3, item 4) | Decided (2026-09-30): both rasters for all four checks. The amplitude value of an arbitrary gradient does not depend on the raster, but its location time does. | Only `GradientRasterTime` for `gradient.slew.axis` and `pns.safe`. |
 | D4 | The version of a specification in the release candidates | Each specification stays version 1 until the first final release (0.1.0). A change of a rule is in the CHANGELOG only (decided 2026-09-30, PR #22). The JSON result format also stays 1 (PR #23). | One version step for each release. One version step for each PR. |
-| D5 | F3, the gamma of the value | The gamma of the target (section 4.2). The value and the limit then use one gamma, and the limit in mT/m is the number that the profile gives. | (b) Convert the limit with `GAMMA` too: the pass or fail is correct (the ratio in Hz/m), but the limit in the result is not the number of the profile. (c) Refuse a profile `gamma` that is not 42.576 MHz/T. |
+| D5 | F3, the gamma of the value | Decided (2026-09-30): the gamma of the target (section 4.2). The value and the limit then use one gamma, and the limit in mT/m is the number that the profile gives. | (b) Convert the limit with `GAMMA` too: the pass or fail is correct (the ratio in Hz/m), but the limit in the result is not the number of the profile. (c) Refuse a profile `gamma` that is not 42.576 MHz/T. |
 
 ## 6. Tests
 
