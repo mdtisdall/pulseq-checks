@@ -3,9 +3,11 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: phase 1 done, phase 2 not started (2026-10-01). The user approved
-the recommended answers of section 5. Section 7 has the measurements and the
-changes to this plan during the work.
+Status: done (2026-10-01). Phase 1 is #35; phase 2 is its own PR. The user
+approved the recommended answers of section 5. Section 7 has the
+measurements and the changes to this plan during the work. Each check of
+this package now gives findings, so the `TODO.md` item "Findings of more
+checks" is removed.
 
 ## 1. Goal
 
@@ -263,3 +265,22 @@ The failing file gives 246 890 findings of `gradient.amplitude.axis`,
 `gradient.slew.axis` (all `SLEW_ABOVE_LIMIT`). The JSON result of the fast
 checks is 357.9 MB (`to_json` 8.7 s), and 1.1 MB with
 `with_max_findings(1000)`.
+
+### 7.3 Measurements of phase 2
+
+The machine and the file of section 7.2. `pns.safe` alone, with the read of
+the file; each time is the median of 3 runs, each in a fresh process.
+"Before" is `main` at `5004e75`. The passing profile is the profile of
+`scripts/budget.py` (peak 82.6 %). The failing profile is the same with each
+`stim_limit` times 0.8 (24, 12 and 20).
+
+| | Before | After |
+|---|---|---|
+| `pns.safe`, passing profile | 14.18 s | 13.95 s |
+| `pns.safe`, failing profile | 14.19 s | 14.10 s |
+| Peak RSS | 0.59 GB | 0.61 GB |
+
+The differences are within the noise of the runs: the intervals cost no
+measurable time. The failing profile gives 6 252 intervals; the largest
+`peak_percent` of the findings (103.28 %) is the value of the result. The
+JSON result is 2.98 MB, and 0.48 MB with `with_max_findings(1000)`.

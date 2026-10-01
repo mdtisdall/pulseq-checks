@@ -1,15 +1,5 @@
 # TODO
 
-- **Findings of more checks (section 8 of `docs/plans/check-findings.md`).**
-  Only `pns.safe` still gives no findings. It can give them later: one
-  finding for each interval where the PNS total is at or above 100 % (phase 2
-  of `docs/plans/gradient-pns-findings.md`). In the release candidates, the
-  specification of each check stays version 1 (design section 5.4): its
-  findings go into `CHANGELOG.md` only. From the first final release (0.1.0)
-  on, decide for each check whether its version changes. For `timing.pypulseq`
-  it did not, because the findings do not change the verdict (decision D6 of
-  `docs/plans/check-findings.md`).
-
 - **Unequal rasters (R6 of `docs/plans/pulseq-checks.md`).** Version 1 of
   `timing.rasters` passes only when the rasters of the file equal the
   rasters of the target. A file with a coarser raster (F = k x T) has its

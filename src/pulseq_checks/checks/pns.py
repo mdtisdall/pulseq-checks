@@ -1,11 +1,12 @@
 """The check rule `pns.safe` (plan section 4.7): the peak of the SAFE PNS total of the
-whole sequence, with the SAFE parameters of the target profile."""
+whole sequence, with the SAFE parameters of the target profile. A fail also gives each interval
+of samples at or above 100 % as a finding (`PnsLevels.above_limit`)."""
 
 import numpy as np
 
 from ..pns import pns_levels_for
-from ..pns_levels import NO_GRADIENTS, SAFE_MODEL, hw_from_dict
-from ..results import Location, Result, State
+from ..pns_levels import NO_GRADIENTS, SAFE_MODEL, PnsInterval, hw_from_dict
+from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
 from ..seq_index import sequence_index
 
@@ -37,7 +38,8 @@ class _SafePns:
             'The check is "not evaluated" when the file does not declare GradientRasterTime or '
             "BlockDurationRaster and the target does not give that raster "
             "(rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not "
-            "use a default of pypulseq for a raster."
+            "use a default of pypulseq for a raster. "
+            "The result also gives each interval at or above 100 % as a finding (see Findings)."
         ),
         cost="slow",
         pypulseq=(
@@ -46,6 +48,22 @@ class _SafePns:
         ),
         url=None,
         rasters=("GradientRasterTime", "BlockDurationRaster"),
+        findings=(
+            "One finding for each interval of consecutive samples where the SAFE total is at "
+            "or above 100 % of the stimulation limit, in time order. A fail has at least one "
+            "finding, and a pass has none. The code is PNS_ABOVE_LIMIT. The location is the "
+            "block ID of the block that holds the first sample of the interval (the last "
+            "block that starts at or before it) and the time of that sample, in seconds from "
+            "the start of the sequence. The data are start_s and end_s (the times of the "
+            "first and the last sample of the interval, in seconds from the start of the "
+            "sequence), peak_percent (the largest total in the interval, in percent of the "
+            "stimulation limit), peak_time_s (the time of the first sample with that total, "
+            "in seconds from the start of the sequence) and num_samples (the number of "
+            "samples of the interval). The message is the start and the end, with up to 6 "
+            "significant digits, and the peak, with up to 4, for example "
+            '"PNS at or above 100 % from 0.0123 s to 0.0125 s, peak 104.2 %". The largest '
+            "peak_percent of the findings is the value of the result."
+        ),
     )
 
     def run(self, ctx: RunContext) -> Result:
@@ -66,8 +84,42 @@ class _SafePns:
             limit=100.0,
             unit="%",
             location=self._location(ctx, levels.peak_time_s),
+            findings=self._findings(ctx, levels.above_limit),
             **model,
         )
+
+    @staticmethod
+    def _findings(ctx: RunContext, intervals: tuple[PnsInterval, ...]) -> tuple[Finding, ...]:
+        """One finding for each interval, in time order. The block of an interval is found
+        by the rule of `_location`, for all intervals in one call of `np.searchsorted`."""
+        if not intervals:
+            return ()
+        index = ctx.measure("index", sequence_index)
+        starts = np.array([interval.start_s for interval in intervals])
+        blocks = np.maximum(np.searchsorted(index.start_s, starts, side="right") - 1, 0)
+        block_ids = index.block_id[blocks].tolist()
+        findings = []
+        for interval, block in zip(intervals, block_ids, strict=True):
+            start_s, end_s = float(interval.start_s), float(interval.end_s)
+            peak_percent = float(100 * interval.peak)
+            findings.append(
+                Finding(
+                    code="PNS_ABOVE_LIMIT",
+                    message=(
+                        f"PNS at or above 100 % from {start_s:.6g} s to {end_s:.6g} s, "
+                        f"peak {peak_percent:.4g} %"
+                    ),
+                    location=Location(block=int(block), time_s=start_s),
+                    data={
+                        "start_s": start_s,
+                        "end_s": end_s,
+                        "peak_percent": peak_percent,
+                        "peak_time_s": float(interval.peak_time_s),
+                        "num_samples": int(interval.num_samples),
+                    },
+                )
+            )
+        return tuple(findings)
 
     @staticmethod
     def _location(ctx: RunContext, time_s: float | None) -> Location | None:

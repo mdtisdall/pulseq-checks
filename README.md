@@ -65,7 +65,9 @@ time, and the values. `timing.pypulseq` gives one finding for each error of
 pypulseq's `check_timing`, and `timing.rasters` gives one finding for each
 raster that differs from the target or that the file does not declare
 correctly. The three gradient checks give one finding for each block, and
-axis, that is above the limit. A plugin check can give its own.
+axis, that is above the limit, and `pns.safe` gives one finding for each
+interval where the SAFE total is at or above 100 %. A plugin check can give its
+own.
 
 The summary on the console gives only the number of findings of each result.
 To see them there, add `--show-findings`. To pass them to another tool, write

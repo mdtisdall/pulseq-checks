@@ -3,7 +3,7 @@ from dataclasses import replace
 import pypulseq as pp
 import pytest
 from pypulseq.utils.safe_pns_prediction import safe_example_hw
-from synthetic import empty_sequence, gre_sequence
+from synthetic import SYSTEM, empty_sequence, gre_sequence
 from test_asc_profile import FIELDS, write_profile
 from test_extensions import _with_rotation_library
 
@@ -71,6 +71,31 @@ def expected_peak(seq_file, profile):
     seq.read(str(seq_file))
     params = profile.models["pns.safe"]
     return pns_levels_for(seq, hardware=(hw_from_dict(params), params["name"])).peak
+
+
+def levels_of(seq, profile):
+    """The `PnsLevels` of `seq` for the SAFE parameters of `profile`, as `run_checks` gets them."""
+    params = profile.models["pns.safe"]
+    return pns_levels_for(seq, hardware=(hw_from_dict(params), params["name"]))
+
+
+def block_at(index, t):
+    """The block ID of the last block that starts at or before `t` (the first block when none
+    does), by a loop over the blocks, not by the `np.searchsorted` of the check."""
+    starts = [i for i in range(index.num_blocks) if index.start_s[i] <= t]
+    return int(index.block_id[max(starts, default=0)])
+
+
+def two_trapezoids():
+    """A trapezoid on x, a delay of 50 ms and the same trapezoid, and the trapezoid alone."""
+    trapezoid = pp.make_trapezoid(channel="x", area=1000, system=SYSTEM)
+    one = pp.Sequence(SYSTEM)
+    one.add_block(trapezoid)
+    two = pp.Sequence(SYSTEM)
+    two.add_block(trapezoid)
+    two.add_block(pp.make_delay(50e-3))
+    two.add_block(trapezoid)
+    return one, two
 
 
 def test_no_safe_parameters_gives_not_evaluated(tmp_path, seq_file):
@@ -175,6 +200,98 @@ def test_a_raster_that_the_file_does_not_declare_comes_from_the_target(target, s
         assert result.value == 100 * expected_peak(seq_file, profile)
         values[raster] = result.value
     assert values[4e-6] != pytest.approx(values[10e-6], rel=1e-3)
+
+
+def test_a_pass_has_no_findings(target, seq_file):
+    result = run_one(seq_file, target(PASS_SCALE))
+    assert result.state is State.PASS
+    assert result.findings == ()
+    assert result.findings_omitted == 0
+
+
+def test_a_sequence_without_gradients_has_no_findings(target):
+    result = run_one(empty_sequence(), target(FAIL_SCALE))
+    assert result.findings == ()
+
+
+def test_a_fail_gives_one_finding_for_each_interval_in_time_order(target):
+    seq = gre_sequence(num_trs=2)
+    profile = target(FAIL_SCALE)
+    result = run_one(seq, profile)
+    levels = levels_of(seq, profile)
+    index = sequence_index(seq)
+    assert result.state is State.FAIL
+    assert len(levels.above_limit) >= 1
+    assert len(result.findings) == len(levels.above_limit)
+    for finding, interval in zip(result.findings, levels.above_limit, strict=True):
+        assert finding.code == "PNS_ABOVE_LIMIT"
+        assert finding.location.time_s == interval.start_s
+        assert finding.location.block == block_at(index, interval.start_s)
+        assert finding.data == {
+            "start_s": interval.start_s,
+            "end_s": interval.end_s,
+            "peak_percent": 100 * interval.peak,
+            "peak_time_s": interval.peak_time_s,
+            "num_samples": interval.num_samples,
+        }
+        assert finding.message == (
+            f"PNS at or above 100 % from {interval.start_s:.6g} s to {interval.end_s:.6g} s, "
+            f"peak {100 * interval.peak:.4g} %"
+        )
+    times = [finding.location.time_s for finding in result.findings]
+    assert times == sorted(times)
+
+
+def test_the_data_and_the_location_of_a_finding_are_python_scalars(target):
+    result = run_one(gre_sequence(num_trs=2), target(FAIL_SCALE))
+    assert result.findings
+    for finding in result.findings:
+        assert type(finding.location.block) is int
+        assert type(finding.location.time_s) is float
+        for key, value in finding.data.items():
+            assert type(value) is (int if key == "num_samples" else float), key
+
+
+def test_the_value_and_the_location_of_the_result_do_not_change_with_the_findings(target):
+    seq = gre_sequence(num_trs=2)
+    profile = target(FAIL_SCALE)
+    result = run_one(seq, profile)
+    levels = levels_of(seq, profile)
+    index = sequence_index(seq)
+    assert max(f.data["peak_percent"] for f in result.findings) == result.value
+    assert result.value == 100 * levels.peak
+    assert (result.limit, result.unit) == (100.0, "%")
+    assert result.location.time_s == levels.peak_time_s
+    assert result.location.block == block_at(index, levels.peak_time_s)
+    assert result.reason is None
+
+
+def test_two_separate_intervals_give_two_findings_in_time_order(target):
+    """The limit scale is the peak of one trapezoid on the example hardware divided by 1.02, so
+    that only the larger hump of the total of a trapezoid is at or above 100 %."""
+    one, two = two_trapezoids()
+    profile = target(levels_of(one, target(1.0)).peak / 1.02)
+    assert len(levels_of(one, profile).above_limit) == 1
+    result = run_one(two, profile)
+    index = sequence_index(two)
+    levels = levels_of(two, profile)
+    assert len(levels.above_limit) == 2
+    first, second = result.findings
+    assert (first.code, second.code) == ("PNS_ABOVE_LIMIT", "PNS_ABOVE_LIMIT")
+    assert [f.location.time_s for f in (first, second)] == [i.start_s for i in levels.above_limit]
+    assert first.location.time_s < second.location.time_s
+    assert first.data["end_s"] < second.data["start_s"]
+    assert [f.location.block for f in (first, second)] == [
+        block_at(index, i.start_s) for i in levels.above_limit
+    ]
+    assert first.location.block != second.location.block
+
+
+def test_the_spec_has_the_findings_text():
+    spec = SAFE.spec
+    assert spec.version == 1
+    assert isinstance(spec.findings, str)
+    assert "PNS_ABOVE_LIMIT" in spec.findings
 
 
 def test_the_spec_gives_each_field():

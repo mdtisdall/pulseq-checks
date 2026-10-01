@@ -64,7 +64,8 @@ gives one finding for each error of `check_timing` of pypulseq, and
 target or that the file does not declare correctly. The three gradient checks
 (`gradient.amplitude.axis`, `gradient.slew.axis` and
 `gradient.amplitude.any-orientation`) give one finding for each block, and
-axis, that is above the limit. `pns.safe` gives no findings. A plugin check
+axis, that is above the limit. `pns.safe` gives one finding for each interval
+of samples where the SAFE total is at or above 100 %. A plugin check
 can give its own ([section 7](#a-check-rule)). The specification of a check in
 [`checks.md`](checks.md) says what its findings are.
 
@@ -1162,10 +1163,6 @@ reader.
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
-- **No findings from `pns.safe`.** Each check of this package gives findings
-  except `pns.safe`, which gives its worst value and its location only. The
-  item is in [`TODO.md`](../TODO.md). A plugin check can give findings now
-  ([section 7](#a-check-rule)).
 - **No convention checks** (handedness, axis mapping), and no worst-case slew
   under rotation. They come later.
 - **No JUnit output.**

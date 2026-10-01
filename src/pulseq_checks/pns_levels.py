@@ -50,6 +50,22 @@ NO_GRADIENTS = "no gradients"
 # Samples within this fraction of the peak count as the peak. Identical TRs differ only by
 # rounding, so the peak time is in the first of them.
 PEAK_TOLERANCE = 1e-6
+# The stimulation limit: a total of 1 is 100 %. `pns.safe` fails when the peak is at or
+# above it (it passes when `peak < 1`), so an interval of `PnsLevels.above_limit` is a run of
+# samples with `total >= PNS_LIMIT`.
+PNS_LIMIT = 1.0
+
+
+@dataclass(frozen=True)
+class PnsInterval:
+    """A run of consecutive samples whose total is at or above `PNS_LIMIT`
+    (`PnsLevels.above_limit`). The time of sample `k` is `(k + 0.5) * dt`."""
+
+    start_s: float  # the time of the first sample of the interval
+    end_s: float  # the time of the last sample of the interval
+    peak: float  # the largest total (float64) in the interval; 1 is the stimulation limit
+    peak_time_s: float  # the time of the first sample of the interval with that total
+    num_samples: int  # the number of samples of the interval
 
 
 @dataclass(frozen=True)
@@ -70,6 +86,9 @@ class PnsLevels:
     peak_time_s: float | None  # the first sample time within PEAK_TOLERANCE of the peak
     axis_peaks: dict[str, float]  # "x", "y", "z": the largest value of each axis
     on_raster: bool  # every block is a whole number of samples (`raster_block_lengths`)
+    above_limit: tuple[PnsInterval, ...] = ()  # the intervals with total >= PNS_LIMIT, in
+    # time order; not empty if and only if `peak >= PNS_LIMIT`, and then the largest
+    # `PnsInterval.peak` equals `peak`
 
 
 def bin_samples_for(num_samples: int, dt: float) -> int:
@@ -125,11 +144,18 @@ def pns_levels(
        known only at the end, so `pns_levels` keeps the start state of each chunk
        (12 numbers) and the float64 maximum of each chunk, and runs again only the
        first chunk whose maximum reaches the threshold.
+    6. The intervals (`above_limit`): the runs of consecutive samples whose float64
+       total is at or above `PNS_LIMIT`, found in the same loop as the peak (no second
+       pass). A run that reaches the end of a chunk continues in the next chunk when
+       the first sample of that chunk is also at or above `PNS_LIMIT`: it is one
+       interval. An interval keeps its first and last sample, its largest total and the
+       first sample with it. They use the totals of item 3, not the float32 bins, so
+       `above_limit` is not empty if and only if `peak >= PNS_LIMIT`.
 
     The result does not depend on the chunk size (exact equality). A sequence without
-    a gradient event gives `reason=NO_GRADIENTS`, no bins, peak 0 and
-    `peak_time_s` None. Memory: the chunk, the longest block, the stored level and a
-    few numbers for each chunk.
+    a gradient event gives `reason=NO_GRADIENTS`, no bins, peak 0, `peak_time_s` None
+    and no interval. Memory: the chunk, the longest block, the stored level and a few
+    numbers for each chunk and for each interval.
 
     Raises ValueError when both `gradient_asc` and `hardware` are given, and
     NotImplementedError for a sequence with the rotation extension
@@ -204,6 +230,7 @@ def pns_levels(
     # The start state and the float64 maximum of each chunk (item 5): enough to run
     # again only the one chunk that holds the peak, instead of keeping every sample.
     chunk_records: list[tuple[int, object, float]] = []
+    intervals = _IntervalFinder(dt)
 
     bin_cursor = 0
     for chunk_index in range(num_chunks):
@@ -217,6 +244,7 @@ def pns_levels(
         chunk_max = float(total.max())
         peak = max(peak, chunk_max)
         chunk_records.append((s0, state_before, chunk_max))
+        intervals.add_chunk(s0, total)
 
         bin_cursor = _store_bins(level_min, level_max, bin_cursor, total, bin_samples)
 
@@ -246,6 +274,7 @@ def pns_levels(
         peak_time_s=peak_time_s,
         axis_peaks=dict(zip(_AXES3, axis_peak.tolist(), strict=True)),
         on_raster=on_raster,
+        above_limit=intervals.finish(),
     )
 
 
@@ -308,6 +337,73 @@ def _chunk_total(gwf: np.ndarray, dt: float, hw_ns, state) -> tuple[np.ndarray, 
     axis_frac = 0.01 * percent
     total = np.sqrt((axis_frac**2).sum(axis=1))
     return total, axis_frac, new_state
+
+
+class _IntervalFinder:
+    """The intervals of consecutive samples with `total >= PNS_LIMIT` (item 6 of
+    `pns_levels`), from the chunks in order. A run that reaches the end of a chunk stays
+    open until the next chunk shows whether it continues. Each open or closed interval
+    is the global indices of its first sample, its last sample and the first sample of
+    its largest total, and that total."""
+
+    def __init__(self, dt: float):
+        self._dt = dt
+        self._closed: list[PnsInterval] = []
+        # The run at the end of the last chunk: (first, last, peak, peak sample), or None.
+        self._open: tuple[int, int, float, int] | None = None
+
+    def add_chunk(self, s0: int, total: np.ndarray) -> None:
+        """Adds the next chunk: `total` (float64) starts at the global sample `s0`."""
+        mask = total >= PNS_LIMIT
+        if not mask.any():
+            self._close_open()
+            return
+        # Zero-copy view as int8: a change of the mask is a nonzero step. `edges` are the
+        # indices where a run starts or where the sample after a run is.
+        edges = np.flatnonzero(np.diff(mask.view(np.int8))) + 1
+        if mask[0]:
+            starts = np.concatenate(([0], edges[1::2]))
+            ends = edges[0::2]
+        else:
+            starts = edges[0::2]
+            ends = edges[1::2]
+        if mask[-1]:
+            ends = np.concatenate((ends, [total.shape[0]]))
+        for i, (a, b) in enumerate(zip(starts.tolist(), ends.tolist(), strict=True)):
+            local = int(np.argmax(total[a:b]))  # the first sample of the largest total
+            run = (s0 + a, s0 + b - 1, float(total[a + local]), s0 + a + local)
+            if i == 0 and a == 0 and self._open is not None:
+                first, _, peak, peak_sample = self._open
+                if run[2] > peak:  # a tie keeps the earlier sample
+                    peak, peak_sample = run[2], run[3]
+                run = (first, run[1], peak, peak_sample)
+            else:
+                self._close_open()
+            if b == total.shape[0]:
+                self._open = run
+            else:
+                self._closed.append(self._interval(run))
+                self._open = None
+
+    def finish(self) -> tuple[PnsInterval, ...]:
+        """The intervals in time order, after the last chunk."""
+        self._close_open()
+        return tuple(self._closed)
+
+    def _close_open(self) -> None:
+        if self._open is not None:
+            self._closed.append(self._interval(self._open))
+            self._open = None
+
+    def _interval(self, run: tuple[int, int, float, int]) -> PnsInterval:
+        first, last, peak, peak_sample = run
+        return PnsInterval(
+            start_s=(first + 0.5) * self._dt,
+            end_s=(last + 0.5) * self._dt,
+            peak=peak,
+            peak_time_s=(peak_sample + 0.5) * self._dt,
+            num_samples=last - first + 1,
+        )
 
 
 def _store_bins(
