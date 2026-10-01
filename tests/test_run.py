@@ -14,7 +14,7 @@ from pulseq_checks.rules import DOCS_URL, CheckSpec, RunContext, spec_url
 from pulseq_checks.run import RunError, run_checks
 
 
-def make_spec(check_id, *, inputs=(), models=(), cost="slow", url=None):
+def make_spec(check_id, *, inputs=(), models=(), cost="slow", url=None, rasters=None):
     return CheckSpec(
         id=check_id,
         version=3,
@@ -27,6 +27,7 @@ def make_spec(check_id, *, inputs=(), models=(), cost="slow", url=None):
         pass_condition="always",
         cost=cost,
         url=url,
+        **({} if rasters is None else {"rasters": tuple(rasters)}),
     )
 
 
@@ -47,7 +48,7 @@ class Rule:
 
 
 def make_profile(
-    name="a", *, opts=None, inputs=(), models=(), hardware_limits=None, unused=()
+    name="a", *, opts=None, inputs=(), models=(), hardware_limits=None, unused=(), rasters=None
 ) -> TargetProfile:
     return TargetProfile(
         name=name,
@@ -56,10 +57,13 @@ def make_profile(
         source_path=None,
         opts=opts,
         hardware_limits=hardware_limits,
-        rasters=None,
+        rasters=rasters,
         models={model: {} for model in models},
         acoustic_resonances=None,
-        sources={path: "profile" for path in inputs},
+        sources={
+            **{path: "profile" for path in inputs},
+            **{f"rasters.{name}": "profile" for name in rasters or {}},
+        },
         unused_sections=tuple(unused),
     )
 
@@ -546,6 +550,168 @@ def test_has_input_is_true_for_a_value_path_of_the_profile_only_without_the_opt_
     ctx = RunContext(spin_echo_sequence(), target, limits_source="sequence object")
     assert ctx.has_input("opts.max_slew")
     assert not ctx.has_input("opts.adc_dead_time")
+
+
+RASTERS = ("GradientRasterTime", "RadiofrequencyRasterTime", "AdcRasterTime", "BlockDurationRaster")
+FILE_ONLY = {name: "file" for name in RASTERS}
+# A minimal file of format 1.3.1: one block with a trapezoid on x, and no [DEFINITIONS].
+FILE_1_3_1 = """[VERSION]
+major 1
+minor 3
+revision 1
+
+[BLOCKS]
+1 0 0 1 0 0 0 0
+
+[TRAP]
+1 250000 100 200 100 0
+
+"""
+
+
+def without_definitions(path, *names):
+    """Remove the lines of the definitions `names` from the file `path`."""
+    lines = path.read_text().split("\n")
+    kept = [line for line in lines if not (line.split() and line.split()[0] in names)]
+    assert len(kept) == len(lines) - len(names)
+    path.write_text("\n".join(kept))
+
+
+def raster_sources_of(monkeypatch, sequence, target):
+    """The `raster_sources` of the context that `run_checks` gives to a rule, and the sequence
+    that the rule gets."""
+    rule = Rule(make_spec("t.a"))
+    install(monkeypatch, rule)
+    run_checks(sequence, [target])
+    (ctx,) = rule.contexts
+    return ctx.raster_sources, ctx.sequence
+
+
+def test_the_rasters_of_a_file_of_format_1_5_0_come_from_the_file(monkeypatch, seq_file):
+    # The raster of the profile is not the raster of the file: the file wins.
+    target = make_profile(rasters={"GradientRasterTime": 4e-6})
+    sources, seq = raster_sources_of(monkeypatch, seq_file, target)
+    assert sources == FILE_ONLY
+    assert seq.grad_raster_time == pytest.approx(10e-6)
+
+
+@pytest.mark.parametrize(
+    ("rasters", "source"),
+    [({"GradientRasterTime": 4e-6}, "target"), (None, "pypulseq default")],
+    ids=["with [rasters]", "without [rasters]"],
+)
+def test_a_raster_that_a_file_of_format_1_5_0_does_not_declare_comes_from_the_target_or_pypulseq(
+    monkeypatch, seq_file, rasters, source
+):
+    without_definitions(seq_file, "GradientRasterTime")
+    sources, seq = raster_sources_of(monkeypatch, seq_file, make_profile(rasters=rasters))
+    assert sources == {**FILE_ONLY, "GradientRasterTime": source}
+    assert "GradientRasterTime" not in seq.definitions
+    expected = 4e-6 if rasters else 10e-6
+    assert seq.grad_raster_time == pytest.approx(expected)
+
+
+@pytest.mark.filterwarnings("ignore:.*:UserWarning")
+def test_the_rasters_of_a_file_of_format_1_3_1_come_from_the_target_or_pypulseq(
+    monkeypatch, tmp_path
+):
+    """pypulseq adds the four definitions of an old file with `set_definition`, so they are
+    in `seq.definitions`, but the file does not declare them."""
+    path = tmp_path / "old.seq"
+    path.write_text(FILE_1_3_1)
+    target = make_profile(rasters={"GradientRasterTime": 4e-6, "BlockDurationRaster": 20e-6})
+    sources, seq = raster_sources_of(monkeypatch, path, target)
+    assert sources == {
+        "GradientRasterTime": "target",
+        "RadiofrequencyRasterTime": "pypulseq default",
+        "AdcRasterTime": "pypulseq default",
+        "BlockDurationRaster": "target",
+    }
+    assert set(RASTERS) <= set(seq.definitions)
+    assert seq.definitions["GradientRasterTime"] == pytest.approx(4e-6)
+    assert seq.definitions["RadiofrequencyRasterTime"] == pytest.approx(1e-6)
+    sources, _ = raster_sources_of(monkeypatch, path, make_profile())
+    assert set(sources.values()) == {"pypulseq default"}
+
+
+def test_the_rasters_of_a_sequence_object_come_from_the_sequence_object(monkeypatch):
+    target = make_profile(rasters={"GradientRasterTime": 4e-6})
+    sources, _ = raster_sources_of(monkeypatch, spin_echo_sequence(), target)
+    assert set(sources) == set(RASTERS)
+    assert set(sources.values()) == {"sequence object"}
+
+
+def test_the_read_of_a_file_does_not_change_set_definition_of_the_sequence(monkeypatch, seq_file):
+    """The record of the undeclared rasters does not stay on the sequence, also when the read
+    raises, and a definition that the file declares is not changed by it."""
+    _, seq = raster_sources_of(monkeypatch, seq_file, make_profile())
+    assert "set_definition" not in vars(seq)
+    assert seq.definitions["GradientRasterTime"] == pytest.approx(10e-6)
+    seen = []
+
+    def failing_read(self, path, *args, **kwargs):
+        seen.append(self)
+        raise ValueError("a test failure")
+
+    monkeypatch.setattr(pp.Sequence, "read", failing_read)
+    with pytest.raises(RunError, match="a test failure"):
+        run_checks(seq_file, [make_profile()])
+    assert "set_definition" not in vars(seen[0])
+
+
+def test_a_default_raster_that_a_check_uses_gives_not_evaluated_and_run_is_not_called(
+    monkeypatch, seq_file
+):
+    without_definitions(seq_file, "GradientRasterTime", "AdcRasterTime")
+    rule = Rule(make_spec("t.a", rasters=("GradientRasterTime", "AdcRasterTime")))
+    install(monkeypatch, rule)
+    (result,) = run_checks(seq_file, [make_profile("x")]).results
+    assert result.state is State.NOT_EVALUATED
+    assert result.reason == (
+        "the file does not declare GradientRasterTime and AdcRasterTime and the target 'x' "
+        "does not give rasters.GradientRasterTime, rasters.AdcRasterTime"
+    )
+    assert rule.contexts == []
+
+
+def test_a_missing_input_and_a_default_raster_give_one_reason(monkeypatch, seq_file):
+    without_definitions(seq_file, "GradientRasterTime")
+    rule = Rule(make_spec("t.a", inputs=("opts.max_grad",), rasters=("GradientRasterTime",)))
+    install(monkeypatch, rule)
+    (result,) = run_checks(seq_file, [make_profile("x")]).results
+    assert result.state is State.NOT_EVALUATED
+    assert result.reason == (
+        "the target 'x' does not give: input opts.max_grad; the file does not declare "
+        "GradientRasterTime and the target 'x' does not give rasters.GradientRasterTime"
+    )
+    assert rule.contexts == []
+
+
+def test_a_raster_that_a_check_uses_and_the_target_or_the_file_gives_is_not_a_reason(
+    monkeypatch, seq_file
+):
+    without_definitions(seq_file, "GradientRasterTime")
+    rule = Rule(make_spec("t.a", rasters=("GradientRasterTime", "BlockDurationRaster")))
+    install(monkeypatch, rule)
+    target = make_profile(rasters={"GradientRasterTime": 4e-6})
+    (result,) = run_checks(seq_file, [target]).results
+    assert result.state is State.PASS
+    # The same check for a Sequence object: no raster is a pypulseq default.
+    (result,) = run_checks(spin_echo_sequence(), [make_profile()]).results
+    assert result.state is State.PASS
+
+
+def test_a_spec_without_rasters_and_the_context_of_a_hand_made_run_work_as_before(monkeypatch):
+    """A plugin gives the fields up to `findings` by position: `rasters` is the last field, with
+    the default `()`. A `RunContext` made by hand has the source "sequence object"."""
+    spec = CheckSpec("t.a", 1, "t", "q", (), (), "l", "t", "p", "fast", None, None, None)
+    assert spec.rasters == ()
+    rule = Rule(spec)
+    install(monkeypatch, rule)
+    (result,) = run_checks(spin_echo_sequence(), [make_profile()]).results
+    assert result.state is State.PASS
+    ctx = RunContext(spin_echo_sequence(), make_profile())
+    assert ctx.raster_sources == {name: "sequence object" for name in RASTERS}
 
 
 class EntryPoint:

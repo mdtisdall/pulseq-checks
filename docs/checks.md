@@ -31,11 +31,13 @@ Peak gradient amplitude under any orientation
 
 **Models:** None
 
+**Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
 **Limit:** opts.max_grad of the target profile, in mT/m (converted from the unit of the profile with the gamma of its Opts), for each physical axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
 
-**Pass condition:** Pass when the peak of |G| is at or below limit * (1 + 1e-9): then no orientation of the scan can give an amplitude above the limit on a physical axis. Fail when the peak of |G| is above it: an orientation exists that gives an amplitude above the limit, but the orientation of the real scan can be a different one. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file.
+**Pass condition:** Pass when the peak of |G| is at or below limit * (1 + 1e-9): then no orientation of the scan can give an amplitude above the limit on a physical axis. Fail when the peak of |G| is above it: an orientation exists that gives an amplitude above the limit, but the orientation of the real scan can be a different one. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster.
 
 **pypulseq function:** None
 
@@ -55,11 +57,13 @@ Peak gradient amplitude of each logical axis
 
 **Models:** None
 
+**Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
 **Limit:** opts.max_grad of the target profile, in mT/m (converted from the unit of the profile with the gamma of its Opts). The same limit applies to each axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
 
-**Pass condition:** Pass when the peak of each axis is at or below limit * (1 + 1e-9). Fail when the peak of any axis is above it. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file.
+**Pass condition:** Pass when the peak of each axis is at or below limit * (1 + 1e-9). Fail when the peak of any axis is above it. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster.
 
 **pypulseq function:** None
 
@@ -79,11 +83,13 @@ Peak gradient slew rate of each logical axis
 
 **Models:** None
 
+**Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
 **Limit:** opts.max_slew of the target profile, in T/m/s (converted from the unit of the profile with the gamma of its Opts). A profile that gives opts.max_grad and opts.rise_time in place of opts.max_slew gives the slew limit max_grad / rise_time, the value that pp.Opts calculates. The same limit applies to each axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
 
-**Pass condition:** Pass when the peak slew of each axis is at or below limit * (1 + 1e-9). Fail when the peak slew of any axis is above it. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file.
+**Pass condition:** Pass when the peak slew of each axis is at or below limit * (1 + 1e-9). Fail when the peak slew of any axis is above it. A sequence with no gradient event passes with the value 0.0 and no location: nothing can be above the limit. A file that uses the Pulseq rotation extension is an error of the check, not a pass or a fail: the gradient events of the file are not the gradients on the scanner, and the measurement refuses such a file. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster.
 
 **pypulseq function:** None
 
@@ -103,11 +109,13 @@ Peripheral nerve stimulation, SAFE model
 
 **Models:** `pns.safe`
 
+**Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
 **Limit:** 100 % of the stimulation limit.
 
 **Tolerance:** None: the rule of pypulseq, `pns_norm < 1` (decision 5 of the plan), with no added tolerance.
 
-**Pass condition:** The peak is below 100 % of the stimulation limit.
+**Pass condition:** The peak is below 100 % of the stimulation limit. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster.
 
 **pypulseq function:** `_safe_gwf_to_pns_chunk` and `calc_pns` of pypulseq.utils.safe_pns_prediction (the pinned fork)
 
@@ -126,6 +134,8 @@ Timing check of pypulseq with the system of the target
 **Inputs:** `rasters.GradientRasterTime`, `rasters.RadiofrequencyRasterTime`, `rasters.AdcRasterTime`, `rasters.BlockDurationRaster`, `opts.rf_dead_time`, `opts.rf_ringdown_time`, `opts.adc_dead_time`
 
 **Models:** None
+
+**Rasters:** None
 
 **Limit:** 0 timing errors. The target does not give a limit.
 
@@ -150,6 +160,8 @@ Rasters of the file against the rasters of the target
 **Inputs:** `rasters.GradientRasterTime`, `rasters.RadiofrequencyRasterTime`, `rasters.AdcRasterTime`, `rasters.BlockDurationRaster`
 
 **Models:** None
+
+**Rasters:** None
 
 **Limit:** T of the raster of the result value, in seconds. The target profile gives it (rasters.<name>) and has no default.
 

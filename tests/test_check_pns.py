@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pypulseq as pp
 import pytest
 from pypulseq.utils.safe_pns_prediction import safe_example_hw
@@ -45,6 +47,21 @@ def target(write_gradient_asc, tmp_path):
 def run_one(seq, profile):
     (result,) = run_checks(seq, [profile]).results
     return result
+
+
+def with_raster(profile, name, value):
+    """`profile` with the `[rasters]` value `name`, and its source."""
+    return replace(
+        profile, rasters={name: value}, sources={**profile.sources, f"rasters.{name}": "profile"}
+    )
+
+
+def without_definition(path, name):
+    """Remove the line of the definition `name` from the file `path`."""
+    lines = path.read_text().split("\n")
+    kept = [line for line in lines if not line.startswith(name + " ")]
+    assert len(kept) == len(lines) - 1
+    path.write_text("\n".join(kept))
 
 
 def expected_peak(seq_file, profile):
@@ -131,10 +148,40 @@ def test_a_sequence_without_gradients_passes_with_zero(target):
     assert (result.model, result.model_version) == ("pns.safe", SAFE_MODEL.version)
 
 
+@pytest.mark.filterwarnings("ignore:No BlockDurationRaster found:UserWarning")
+@pytest.mark.parametrize("name", ["GradientRasterTime", "BlockDurationRaster"])
+def test_a_raster_that_the_file_does_not_declare_and_the_target_does_not_give_is_not_evaluated(
+    target, seq_file, name
+):
+    without_definition(seq_file, name)
+    result = run_one(seq_file, target(FAIL_SCALE))
+    assert result.state is State.NOT_EVALUATED
+    assert result.reason == (
+        f"the file does not declare {name} and the target 'Test target' does not give "
+        f"rasters.{name}"
+    )
+    assert result.value is None
+
+
+def test_a_raster_that_the_file_does_not_declare_comes_from_the_target(target, seq_file):
+    """The file has a 10 µs gradient raster, and the target gives 4 µs: `pns_levels` uses the
+    4 µs, so the value is not the value for 10 µs."""
+    without_definition(seq_file, "GradientRasterTime")
+    values = {}
+    for raster in (4e-6, 10e-6):
+        profile = with_raster(target(FAIL_SCALE), "GradientRasterTime", raster)
+        result = run_one(seq_file, profile)
+        assert result.state is State.FAIL
+        assert result.value == 100 * expected_peak(seq_file, profile)
+        values[raster] = result.value
+    assert values[4e-6] != pytest.approx(values[10e-6], rel=1e-3)
+
+
 def test_the_spec_gives_each_field():
     spec = SAFE.spec
     assert (spec.id, spec.version, spec.models, spec.inputs) == ("pns.safe", 1, ("pns.safe",), ())
     assert spec.cost == "slow"
+    assert spec.rasters == ("GradientRasterTime", "BlockDurationRaster")
     assert spec.url is None
     for field in ("title", "quantity", "limit", "tolerance", "pass_condition", "pypulseq"):
         assert getattr(spec, field)

@@ -32,13 +32,20 @@ class _SafePns:
             "None: the rule of pypulseq, `pns_norm < 1` (decision 5 of the plan), with no "
             "added tolerance."
         ),
-        pass_condition="The peak is below 100 % of the stimulation limit.",
+        pass_condition=(
+            "The peak is below 100 % of the stimulation limit. "
+            'The check is "not evaluated" when the file does not declare GradientRasterTime or '
+            "BlockDurationRaster and the target does not give that raster "
+            "(rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not "
+            "use a default of pypulseq for a raster."
+        ),
         cost="slow",
         pypulseq=(
             "`_safe_gwf_to_pns_chunk` and `calc_pns` of pypulseq.utils.safe_pns_prediction "
             "(the pinned fork)"
         ),
         url=None,
+        rasters=("GradientRasterTime", "BlockDurationRaster"),
     )
 
     def run(self, ctx: RunContext) -> Result:

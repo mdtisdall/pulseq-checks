@@ -28,10 +28,10 @@ The checks of version 1:
 |---|---|
 | `timing.rasters` | the four `[rasters]` values |
 | `timing.pypulseq` | the four `[rasters]` values, and `opts.rf_dead_time`, `opts.rf_ringdown_time` and `opts.adc_dead_time` |
-| `gradient.amplitude.axis` | `opts.max_grad` |
-| `gradient.slew.axis` | `opts.max_slew`, or `opts.max_grad` and `opts.rise_time` |
-| `gradient.amplitude.any-orientation` | `opts.max_grad` |
-| `pns.safe` | the SAFE parameters, `[models.pns.safe]` (from the profile file or from an `.asc` file) |
+| `gradient.amplitude.axis` | `opts.max_grad`, and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
+| `gradient.slew.axis` | `opts.max_slew`, or `opts.max_grad` and `opts.rise_time`, and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
+| `gradient.amplitude.any-orientation` | `opts.max_grad`, and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
+| `pns.safe` | the SAFE parameters, `[models.pns.safe]` (from the profile file or from an `.asc` file), and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
 
 The quantity, the limit, the tolerance, the pass condition and the cost class
 of each check are in [`checks.md`](checks.md). Each result links to its
@@ -43,7 +43,7 @@ heading there.
 |---|---|
 | pass | The check ran, and the sequence meets the limit. |
 | fail | The check ran, and the sequence does not meet the limit. |
-| not evaluated | The check did not run, because the target profile does not give a value or a model that the check needs. It is not a pass and not a fail. |
+| not evaluated | The check did not run, because the target profile does not give a value or a model that the check needs, or because the file does not declare a raster that the check uses and the target does not give it. It is not a pass and not a fail. |
 | error | The check cannot run on this sequence: an exception in the check, or an input that the measurement refuses (for example a file with the rotation extension). It is not a fail. |
 
 Each result has the check ID and the version of its specification, the
@@ -77,6 +77,18 @@ There are no default limits. A value that the profile does not give is not
 replaced by a default. The check that needs it gives "not evaluated". For
 example, `pns.safe` with no SAFE parameters is "not evaluated": the example
 hardware of pypulseq is not a real scanner, so it never gives a pass.
+
+The same rule holds for the rasters. A `.seq` file declares its rasters in
+`[DEFINITIONS]` (`GradientRasterTime`, `RadiofrequencyRasterTime`,
+`AdcRasterTime` and `BlockDurationRaster`). A file of format 1.4.0 or newer
+can leave one out, and a file of an older format does not have them. For a
+raster that the file does not declare, the check uses the raster of the
+target (`[rasters]`), as the interpreter of the target does. When the target
+does not give it either, pypulseq would use its own default (for example 10 µs
+for `GradientRasterTime`). A check that uses that raster gives "not
+evaluated" and says which raster is missing. The check does not use the
+default. `CheckSpec.rasters` lists the rasters that a check uses
+([section 7](#a-check-rule)).
 
 A missing or invalid profile, a missing or invalid check configuration, or a
 run with no target is an error of the run. It is not a result of a check (see
@@ -957,12 +969,14 @@ same.
 | `pypulseq` | The pypulseq function that the check uses, or `None`. |
 | `url` | The link to the documentation of the check. A plugin sets it. With `None`, a result links to the heading of the ID in the `checks.md` of this package, which is wrong for a plugin. |
 | `findings` | A text, or `None` (the default). A check that gives findings documents them here: what one finding is, its codes, its location, the keys of `data` and the order of the findings. A check that gives none leaves it `None`. |
+| `rasters` | A tuple of the raster names that the measurement of the check uses (`"GradientRasterTime"`, `"RadiofrequencyRasterTime"`, `"AdcRasterTime"`, `"BlockDurationRaster"`). The default is `()`. Put it after `findings` when you give the fields by position. |
 
 The run function does these steps for each target:
 
 1. It makes a `RunContext`. The sequence is read with the `Opts` of the target.
 2. When a value path of `spec.inputs` is missing, or a model of `spec.models`
-   is not in the profile, the result is "not evaluated" **before** `run` is
+   is not in the profile, or a raster of `spec.rasters` is neither in the file
+   nor in the profile, the result is "not evaluated" **before** `run` is
    called. The reason names what is missing. Thus `run` can use these values
    without a check.
 3. It calls `rule.run(ctx)`. An exception gives the result "error", with the
@@ -981,6 +995,7 @@ The run function does these steps for each target:
 | `ctx.profile` | The `TargetProfile`. |
 | `ctx.limits_source` | `"profile"`, or `"sequence object"` ([section 5](#5-the-python-api)). |
 | `ctx.hardware_limits` | The `HardwareLimits` for the gradient checks, or `None`. |
+| `ctx.raster_sources` | A dict from each raster name to where its value comes from: `"file"` (the file declares it), `"target"` (the file does not, and the profile gives it), `"sequence object"` (the sequence is a `Sequence` object) or `"pypulseq default"` (neither gives it). A `RunContext` that you make by hand has `"sequence object"` for all four. |
 | `ctx.has_input(path)` | True when the target gives the value path. |
 | `ctx.measure(name, fn)` | `fn(ctx.sequence)`, calculated one time for each `name` and each target. The other rules of the target get the kept value. |
 | `ctx.result(spec, state, **fields)` | A `Result` with `check_id`, `spec_version`, `target` and `spec_url` set. `fields` are `value`, `limit`, `unit`, `location`, `model`, `model_version`, `reason` and `findings`. Do not set `required`. |
