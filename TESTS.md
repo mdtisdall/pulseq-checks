@@ -3466,6 +3466,124 @@ limits source `"sequence object"`, and checks `opts.max_grad`, `opts.max_slew` a
 
 **Assumptions:** The test calls `RunContext` directly, and does not use the run function.
 
+#### `test_the_rasters_of_a_file_of_format_1_5_0_come_from_the_file`
+
+**Checks:** For a `.seq` file of format 1.5.0 that pypulseq writes, `ctx.raster_sources` is
+`"file"` for all four rasters, also when the profile gives a different
+`GradientRasterTime`. `seq.grad_raster_time` is the raster of the file.
+
+**How:** The test writes `spin_echo_sequence()` to a file, runs a rule with a target whose
+`[rasters]` has `GradientRasterTime = 4e-6`, and reads `raster_sources` and the sequence from
+the context that the rule got.
+
+**Assumptions:** pypulseq writes the four rasters to `[DEFINITIONS]`.
+
+#### `test_a_raster_that_a_file_of_format_1_5_0_does_not_declare_comes_from_the_target_or_pypulseq`
+
+**Checks:** When the `GradientRasterTime` line is not in the file, its source is `"target"` for a
+profile that gives `rasters.GradientRasterTime` and `"pypulseq default"` for a profile with no
+`[rasters]`. The other three rasters stay `"file"`. The raster is not in `seq.definitions`
+(pypulseq does not add it for a file of format 1.4.0 or newer), and `seq.grad_raster_time` is
+4 µs for the target and the pypulseq default 10 µs without it.
+
+**How:** The test writes `spin_echo_sequence()` to a file, removes the `GradientRasterTime`
+line of the text, and runs a rule for the two targets.
+
+**Assumptions:** The file has a 10 µs gradient raster and the removal of the line does not
+change the blocks. This test also pins the behavior of pypulseq for a format 1.4.0 or newer
+(a missing raster is not in `seq.definitions`).
+
+#### `test_the_rasters_of_a_file_of_format_1_3_1_come_from_the_target_or_pypulseq`
+
+**Checks:** For a hand-written file of format 1.3.1, with no `[DEFINITIONS]`, no raster is
+`"file"`: the source is `"target"` for the rasters that the profile gives, and `"pypulseq
+default"` for the others. The four rasters are in `seq.definitions`, with the value of the
+target or of pypulseq. With no `[rasters]` all four are `"pypulseq default"`.
+
+**How:** The test writes a minimal file (one block with a trapezoid on x) with `[VERSION]` 1
+3 1 and no definitions. The target gives `GradientRasterTime` and `BlockDurationRaster`. The
+test checks `raster_sources`, and that `seq.definitions` has all four names, with the 4 µs of
+the target and the 1 µs of pypulseq for `RadiofrequencyRasterTime`. It runs the same file with
+a target with no `[rasters]`.
+
+**Assumptions:** This test pins the behavior of the pinned pypulseq (`read_seq.py`): for a
+file older than 1.4.0 `read` calls `Sequence.set_definition` for each raster that the file
+does not declare, and only there. If a new pypulseq changes that, this test fails and the
+detection in `run._read_sequence` needs a change. The test hides the warnings of pypulseq for
+an old file.
+
+#### `test_the_rasters_of_a_sequence_object_come_from_the_sequence_object`
+
+**Checks:** For a `Sequence` object, all four rasters have the source `"sequence object"`,
+also when the profile gives a raster.
+
+**How:** The test runs a rule on `spin_echo_sequence()` with a target that gives
+`GradientRasterTime`, and checks the names and the sources.
+
+**Assumptions:** None.
+
+#### `test_the_read_of_a_file_does_not_change_set_definition_of_the_sequence`
+
+**Checks:** After the read of a `.seq` file, the sequence has no instance attribute
+`set_definition` (the record of the undeclared rasters is removed), and a raster that the
+file declares has the value of the file. When `Sequence.read` raises, the instance attribute
+is also removed, and the run function gives the `RunError` of the read.
+
+**How:** The test runs a rule on a file and checks `vars(seq)` and `seq.definitions`. It
+then replaces `pp.Sequence.read` with a function that keeps the sequence and raises
+`ValueError`, runs `run_checks`, and checks the `RunError` and `vars(...)` of the kept
+sequence.
+
+**Assumptions:** The test checks the instance attribute, not that a later call of
+`set_definition` works; the method of the class is not changed.
+
+#### `test_a_default_raster_that_a_check_uses_gives_not_evaluated_and_run_is_not_called`
+
+**Checks:** A check with `rasters` that lists two rasters that the file does not declare, for a
+target with no `[rasters]`, gives "not evaluated". The reason names both rasters and the target.
+`run` is not called.
+
+**How:** The test removes the `GradientRasterTime` and `AdcRasterTime` lines from a file, runs
+a rule that lists these two rasters, and compares the reason with the full text.
+
+**Assumptions:** None.
+
+#### `test_a_missing_input_and_a_default_raster_give_one_reason`
+
+**Checks:** When a check lacks an input and a raster, the result is "not evaluated" with one reason
+that has the text for the input (unchanged) and the text for the raster, separated by a
+semicolon. `run` is not called.
+
+**How:** The test runs a rule with the input `opts.max_grad` and the raster
+`GradientRasterTime` on a file without that raster and a target without either, and compares
+the reason with the full text.
+
+**Assumptions:** None.
+
+#### `test_a_raster_that_a_check_uses_and_the_target_or_the_file_gives_is_not_a_reason`
+
+**Checks:** A check that lists a raster that the target gives (the file does not declare it) and a
+raster that the file declares runs, and passes. The same check on a `Sequence` object runs for a
+target with no `[rasters]`.
+
+**How:** The test runs a rule with `rasters` of `GradientRasterTime` and `BlockDurationRaster`
+on a file without the first line, for a target that gives it, and then on
+`spin_echo_sequence()`.
+
+**Assumptions:** None.
+
+#### `test_a_spec_without_rasters_and_the_context_of_a_hand_made_run_work_as_before`
+
+**Checks:** A `CheckSpec` that a plugin makes with the fields up to `findings` by position has
+`rasters == ()` and runs as before. A `RunContext` that is made by hand has the source
+`"sequence object"` for all four rasters.
+
+**How:** The test makes a `CheckSpec` with 13 positional arguments, runs it with `run_checks`,
+and makes `RunContext(sequence, profile)`.
+
+**Assumptions:** The positional order of the earlier fields does not change. A rule that is
+called directly (without `run_checks`) is not checked for rasters: only the run function does it.
+
 #### `test_check_rules_are_keyed_by_spec_id`
 
 **Checks:** `registry.check_rules()` gives a dict of the loaded rules by `spec.id`, in any
@@ -4626,7 +4744,7 @@ limits in mT/m and T/m/s are the ones that the test gave.
 
 #### `test_a_profile_with_another_gamma_compares_value_and_limit_with_that_gamma`
 
-**Checks:** (R3 of the plan `docs/plans/raster-source.md`.) A profile with `gamma` 40 MHz/T
+**Checks:** (R9 of `docs/plans/pulseq-checks.md`.) A profile with `gamma` 40 MHz/T
 and the limits 20 mT/m and 200 T/m/s, and a file with a 21 mT/m gradient (slew 210 T/m/s),
 give "fail" for each of the three rules, with the value 21 mT/m, 210 T/m/s and 21 mT/m and
 the limit of the profile. The value and the limit use the same gamma.
@@ -4659,8 +4777,8 @@ later pypulseq that stores a rotation in another way (see `refuse_rotations`).
 
 **Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
 cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
-rule, `opts.max_grad` for the other two), and a non-empty title, quantity, limit,
-tolerance and pass condition.
+rule, `opts.max_grad` for the other two), the rasters `GradientRasterTime` and
+`BlockDurationRaster`, and a non-empty title, quantity, limit, tolerance and pass condition.
 
 **How:** The test compares each field, and checks that each of the five texts is a string
 with a character that is not white space.
@@ -4683,6 +4801,36 @@ Before the fix, the profiles with no rasters and with 10 µs gave 40 T/m/s and p
 
 **Assumptions:** The file stores the amplitudes with fewer digits, so the value has a
 relative tolerance of 1e-4.
+
+#### `test_a_raster_that_the_file_does_not_declare_and_the_target_does_not_give_is_not_evaluated`
+
+**Checks:** When the file does not declare `GradientRasterTime` (or `BlockDurationRaster`) and
+the profile has no `[rasters]`, all three gradient checks give "not evaluated", with the
+reason "the file does not declare <raster> and the target 't' does not give rasters.<raster>"
+and no value, although the profile gives both limits.
+
+**How:** The test writes `raster_4us_sequence` to a file, removes the line of the raster from
+`[DEFINITIONS]` and runs the three rules with `run_checks` for a profile with `max_grad = 100`
+and `max_slew = 50`. Before the change, the checks passed or failed with a raster of pypulseq.
+
+**Assumptions:** The test hides the warning of pypulseq for a missing `BlockDurationRaster`. It
+does not run the checks of other modules.
+
+#### `test_a_raster_that_the_file_does_not_declare_comes_from_the_target`
+
+**Checks:** With the `GradientRasterTime` line removed and `rasters.GradientRasterTime` in the
+profile, the three checks are evaluated with the raster of the target. With 4 µs the slew is
+the junction value 60 T/m/s (a fail against 50 T/m/s). With 10 µs the times of the gradient
+points are 2.5 times longer, and the slew is the junction value 24 T/m/s (a pass). The amplitude
+checks pass with 16 mT/m in both cases.
+
+**How:** The test writes `raster_4us_sequence`, removes the line, and runs the three rules
+with a profile that gives both limits and the raster. The values have a relative tolerance of
+1e-4 (the file stores the amplitudes with fewer digits). A profile with a raster is
+`replace(profile, rasters=..., sources=...)`.
+
+**Assumptions:** The raster of the target is the raster that pypulseq uses for the missing
+definition (`seq.system`). This behavior did not change in this phase: the test pins it.
 
 ### 2.15 PNS check (`test_check_pns.py`)
 
@@ -4759,10 +4907,37 @@ the model and its version.
 
 **Assumptions:** None.
 
+#### `test_a_raster_that_the_file_does_not_declare_and_the_target_does_not_give_is_not_evaluated`
+
+**Checks:** When the file does not declare `GradientRasterTime` (or `BlockDurationRaster`) and
+the profile has no `[rasters]`, `pns.safe` gives "not evaluated", with the reason "the file
+does not declare <raster> and the target 'Test target' does not give rasters.<raster>" and no
+value, although the profile has the SAFE parameters.
+
+**How:** The test removes the line of the raster from the gradient-echo file and runs the
+check with the failing scale.
+
+**Assumptions:** The test hides the warning of pypulseq for a missing `BlockDurationRaster`.
+
+#### `test_a_raster_that_the_file_does_not_declare_comes_from_the_target`
+
+**Checks:** With the `GradientRasterTime` line removed and `rasters.GradientRasterTime` of 4 µs
+or 10 µs in the profile, the check is evaluated (a fail with the failing scale). The value is
+100 times the peak of `pns_levels_for` for the file read with the `Opts` of the profile, and
+the value for 4 µs is not the value for 10 µs.
+
+**How:** The test runs the check for each raster and compares the values with `expected_peak`,
+and the two values with each other.
+
+**Assumptions:** The raster of the target is the raster that pypulseq uses for the missing
+definition (`seq.system`). The difference of the two values shows that `pns_levels` uses the
+raster (`dt` and the sample times); the test does not check the size of the difference.
+
 #### `test_the_spec_gives_each_field`
 
 **Checks:** The ID is `pns.safe`, the version is 1, `models` is `("pns.safe",)`, `inputs`
-is empty, `cost` is "slow", `url` is None, the other text fields are not empty, and
+is empty, `rasters` is `("GradientRasterTime", "BlockDurationRaster")`, `cost` is "slow",
+`url` is None, the other text fields are not empty, and
 `pypulseq` names `_safe_gwf_to_pns_chunk`.
 
 **How:** The test reads the fields of `SAFE.spec`.

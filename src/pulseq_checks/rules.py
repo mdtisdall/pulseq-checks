@@ -4,11 +4,12 @@ target."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .grad_limits import HardwareLimits
+from .profile import RASTER_OPTS
 from .results import Result, State
 
 if TYPE_CHECKING:
@@ -27,7 +28,11 @@ class CheckSpec:
     and `models` the model names (for example "pns.safe"). A plugin check gives its own
     `url`; a check of this package gives None. For a check that gives findings, `findings`
     says what one finding is, its codes, its location, the keys of `data`, and the order of
-    the findings (plan check-findings, section 4.3); None for a check that gives none."""
+    the findings (plan check-findings, section 4.3); None for a check that gives none.
+    `rasters` are the raster names that the measurement of the check uses ("GradientRasterTime",
+    "RadiofrequencyRasterTime", "AdcRasterTime", "BlockDurationRaster"). The run function gives
+    "not evaluated" when the file does not declare one of them and the target does not give
+    it."""
 
     id: str
     version: int
@@ -42,6 +47,7 @@ class CheckSpec:
     pypulseq: str | None = None
     url: str | None = None
     findings: str | None = None
+    rasters: tuple[str, ...] = ()
 
 
 def spec_url(spec: CheckSpec) -> str:
@@ -58,7 +64,14 @@ class RunContext:
     `sequence` is read with the `Opts` of the target, `profile` is the target, and
     `limits_source` is "profile" or "sequence object" (decision 4). `hardware_limits` is
     the gradient limits that the gradient checks use: `profile.hardware_limits`, or the
-    limits of `seq.system` with the opt-in of decision 4, or None."""
+    limits of `seq.system` with the opt-in of decision 4, or None.
+
+    `raster_sources` maps each raster name of `RASTER_OPTS` to where its value comes from:
+    "file" (the file declares it), "target" (the file does not, and the profile gives it),
+    "sequence object" (the sequence is a `pp.Sequence` object, not a file) or "pypulseq
+    default" (neither the file nor the profile gives it). The default is "sequence object" for
+    all four rasters: a context that is made by hand has a sequence object, and no rule is
+    "not evaluated" for it."""
 
     def __init__(
         self,
@@ -67,11 +80,17 @@ class RunContext:
         *,
         limits_source: str = "profile",
         hardware_limits: HardwareLimits | None = None,
+        raster_sources: Mapping[str, str] | None = None,
     ) -> None:
         self.sequence = sequence
         self.profile = profile
         self.limits_source = limits_source
         self.hardware_limits = hardware_limits
+        self.raster_sources = (
+            {name: "sequence object" for name in RASTER_OPTS}
+            if raster_sources is None
+            else dict(raster_sources)
+        )
         self._measurements: dict[str, Any] = {}
 
     def measure(self, name: str, fn: Callable[[pp.Sequence], Any]) -> Any:

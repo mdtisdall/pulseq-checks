@@ -51,6 +51,12 @@ _GAMMA = (
     "when the limits come from the sequence object. The limit uses the same gamma, so the "
     "value and the limit are in the same units."
 )
+_RASTERS = ("GradientRasterTime", "BlockDurationRaster")
+_NOT_EVALUATED_RASTERS = (
+    'The check is "not evaluated" when the file does not declare GradientRasterTime or '
+    "BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime "
+    "or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster."
+)
 
 
 def _hardware_limits(ctx: RunContext) -> HardwareLimits:
@@ -169,11 +175,17 @@ class _AmplitudeAxis(_GradientCheck):
         tolerance=_TOLERANCE,
         pass_condition=(
             "Pass when the peak of each axis is at or below limit * (1 + 1e-9). Fail when the "
-            "peak of any axis is above it. " + _NO_GRADIENTS + " " + _ROTATION
+            "peak of any axis is above it. "
+            + _NO_GRADIENTS
+            + " "
+            + _ROTATION
+            + " "
+            + _NOT_EVALUATED_RASTERS
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        rasters=_RASTERS,
     )
     unit = "mT/m"
 
@@ -235,11 +247,17 @@ class _SlewAxis(_GradientCheck):
         tolerance=_TOLERANCE,
         pass_condition=(
             "Pass when the peak slew of each axis is at or below limit * (1 + 1e-9). Fail "
-            "when the peak slew of any axis is above it. " + _NO_GRADIENTS + " " + _ROTATION
+            "when the peak slew of any axis is above it. "
+            + _NO_GRADIENTS
+            + " "
+            + _ROTATION
+            + " "
+            + _NOT_EVALUATED_RASTERS
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        rasters=_RASTERS,
     )
     unit = "T/m/s"
 
@@ -294,10 +312,13 @@ class _AmplitudeAnyOrientation(_GradientCheck):
             + _NO_GRADIENTS
             + " "
             + _ROTATION
+            + " "
+            + _NOT_EVALUATED_RASTERS
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        rasters=_RASTERS,
     )
     unit = "mT/m"
 

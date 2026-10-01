@@ -338,6 +338,18 @@ say. A rule for unequal rasters is a later study, based on the behavior of
 specific interpreters (`TODO.md`). The timing check then runs with the
 rasters of the target (decision 5).
 
+The measurements use the rasters of the file: `seq.grad_raster_time` and the
+block durations of the file, not the rasters of `seq.system` (R8). For
+example, `gradient.slew.axis` divides the step at a block junction by the
+gradient raster that the file declares. With R6, a raster of the file that
+differs from the raster of the target is the subject of the raster check
+only. When the file does not declare a raster (a file older than 1.4.0, or a
+damaged file), the raster of the target replaces it, as the interpreter of
+the target does. When the target does not give it either, each check that
+lists that raster in `CheckSpec.rasters` is "not evaluated": a check does not
+use a default of pypulseq for a raster. The gradient checks and the PNS check
+list `GradientRasterTime` and `BlockDurationRaster`.
+
 ### 5.11 The target profile format
 
 This section gives the facts and the rules for the format of section 5.2
@@ -669,6 +681,8 @@ They are for this repository. Do not open them again.
 | R5 | The GPA limits in the `.asc` file | The version 1 `.asc` profile reader reads them. | 5.11, 8 |
 | R6 | The direction of the raster rule | Version 1 has no rule for unequal rasters: the rasters of the file must equal the rasters of the target. A rule for unequal rasters must come from the behavior of specific interpreters, not from the Pulseq specification alone (decided 2026-09-30, in phase 5 of the plan). | 5.10 |
 | R7 | The order of step 2.4 and step 1 | Step 2.4 comes before step 1 in pulseq-reports. Until step 3, a moved module changes here first; pulseq-reports changes its copy only for a bug fix, which also comes here. | 7.3, 9 |
+| R8 | The rasters of a measurement | The rasters of the file. The junction step of `gradient.slew.axis` is divided by `seq.grad_raster_time`, not by the raster of `seq.system`. A raster that the file does not declare comes from the target. When the target does not give it either, a check that lists it in `CheckSpec.rasters` is "not evaluated". The three gradient checks and `pns.safe` list `GradientRasterTime` and `BlockDurationRaster`. Before, a file with a 4 µs raster, read with a 10 µs target or with no `[rasters]`, had junction steps 2.5 times too small (decided 2026-09-30, decisions D1 to D3 of the raster-source plan, PR #28 and the PR of its phase 3). | 5.10 |
+| R9 | The gamma of the gradient values | The gradient checks convert the values of the file with the gamma of the target (`opts.gamma`, or 42.576 MHz/T), the same gamma as the limits; with the limits of the sequence object, the gamma of `seq.system`. Before, the values used a fixed 42.576 MHz/T and the limits the gamma of the target: with `gamma = 40e6`, a 21 mT/m gradient read as 19.7 mT/m and passed a 20 mT/m limit (decided 2026-09-30, decision D5 of the raster-source plan, PR #30). | 5.10, 5.11 |
 
 Decision R7 changes the order of work of pulseq-reports. The pulseq-reports
 design must record that its step 1 waits for step 2.4 of this repository.

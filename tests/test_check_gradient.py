@@ -562,6 +562,7 @@ def test_the_spec_sets_each_field(check):
     assert spec.url is None
     assert spec.models == ()
     assert spec.inputs == (("opts.max_slew",) if check is SLEW_AXIS else ("opts.max_grad",))
+    assert spec.rasters == ("GradientRasterTime", "BlockDurationRaster")
     for text in (spec.title, spec.quantity, spec.limit, spec.tolerance, spec.pass_condition):
         assert isinstance(text, str)
         assert text.strip()
@@ -586,3 +587,66 @@ def test_the_slew_of_a_junction_uses_the_gradient_raster_of_the_file_for_any_tar
     assert result.location is not None
     assert result.location.block == 2
     assert result.location.time_s == pytest.approx(RASTER_4US_JUNCTION_TIME)
+
+
+def with_rasters(profile: TargetProfile, rasters: dict[str, float]) -> TargetProfile:
+    """`profile` with the `[rasters]` values `rasters`, and their sources."""
+    sources = {**profile.sources, **{f"rasters.{name}": "profile" for name in rasters}}
+    return replace(profile, rasters=rasters, sources=sources)
+
+
+def write_without_definition(path, name: str) -> None:
+    """Write `raster_4us_sequence` to `path`, and remove the line of the definition `name`
+    from its `[DEFINITIONS]`: the file does not declare that raster."""
+    raster_4us_sequence().write(str(path))
+    lines = path.read_text().split("\n")
+    kept = [line for line in lines if not line.startswith(name + " ")]
+    assert len(kept) == len(lines) - 1
+    path.write_text("\n".join(kept))
+
+
+@pytest.mark.parametrize("name", ["GradientRasterTime", "BlockDurationRaster"])
+@pytest.mark.filterwarnings("ignore:No BlockDurationRaster found:UserWarning")
+def test_a_raster_that_the_file_does_not_declare_and_the_target_does_not_give_is_not_evaluated(
+    monkeypatch, tmp_path, name
+):
+    install(monkeypatch, *CHECKS)
+    path = tmp_path / "no_raster.seq"
+    write_without_definition(path, name)
+
+    matrix = run_checks(path, [make_profile(max_grad=100.0, max_slew=50.0)])
+
+    assert len(matrix.results) == 3
+    for result in matrix.results:
+        assert result.state is State.NOT_EVALUATED
+        assert result.reason == (
+            f"the file does not declare {name} and the target 't' does not give rasters.{name}"
+        )
+        assert result.value is None
+
+
+@pytest.mark.parametrize(
+    ("raster", "state", "slew"),
+    [(4e-6, State.FAIL, RASTER_4US_JUNCTION), (10e-6, State.PASS, 24.0)],
+    ids=["4 us", "10 us"],
+)
+def test_a_raster_that_the_file_does_not_declare_comes_from_the_target(
+    monkeypatch, tmp_path, raster, state, slew
+):
+    """The junction step of `raster_4us_sequence` divided by the raster of the target: 60 T/m/s
+    for 4 µs, and 24 T/m/s for 10 µs. The times of the gradient points are in units of the
+    raster too, so with 10 µs the segment slopes are 2.5 times smaller (16 T/m/s)."""
+    install(monkeypatch, *CHECKS)
+    path = tmp_path / "no_raster.seq"
+    write_without_definition(path, "GradientRasterTime")
+    profile = with_rasters(
+        make_profile(max_grad=100.0, max_slew=50.0), {"GradientRasterTime": raster}
+    )
+
+    results = {r.check_id: r for r in run_checks(path, [profile]).results}
+
+    assert results["gradient.slew.axis"].state is state
+    assert results["gradient.slew.axis"].value == pytest.approx(slew, rel=1e-4)
+    for check_id in ("gradient.amplitude.axis", "gradient.amplitude.any-orientation"):
+        assert results[check_id].state is State.PASS
+        assert results[check_id].value == pytest.approx(16.0, rel=1e-4)

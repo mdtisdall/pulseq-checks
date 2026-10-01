@@ -16,6 +16,17 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   (what one finding is, its codes, its location, the keys of `data` and the
   order). It is the last field of `CheckSpec`, so that a plugin that gives the
   earlier fields by position keeps working.
+- **`CheckSpec.rasters`**: the raster names that the measurement of a check uses
+  (`GradientRasterTime`, `RadiofrequencyRasterTime`, `AdcRasterTime`,
+  `BlockDurationRaster`). The default is `()`. It is the last field of
+  `CheckSpec`, after `findings`, so that a plugin that gives the earlier fields
+  by position keeps working. The run function gives "not evaluated" before
+  `run` when the file does not declare a listed raster and the target does not
+  give it. `docs/checks.md` has a "Rasters" line for each check.
+- **`RunContext.raster_sources`**: a dict from each raster name to where its
+  value comes from: `"file"`, `"target"`, `"sequence object"` or `"pypulseq
+  default"`. A `RunContext` that is made by hand has `"sequence object"` for all
+  four rasters, so that no rule of a plugin is "not evaluated" for it.
 - **`ResultMatrix.with_max_findings(n)`**: a new matrix in which each result
   keeps at most `n` findings, and `findings_omitted` has the number of the
   others.
@@ -64,6 +75,18 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 
 ### Fixed
 
+- **A raster that the file does not declare**: `gradient.amplitude.axis`,
+  `gradient.slew.axis`, `gradient.amplitude.any-orientation` and `pns.safe` use
+  `GradientRasterTime` and `BlockDurationRaster` (the sample times of an
+  arbitrary gradient, the block start times and, for `pns.safe`, the time step
+  of the model). When the file does not declare one of them (a file older than
+  1.4.0, or a damaged file) and the target gives it in `[rasters]`, the checks
+  use the raster of the target. When the target does not give it either, the
+  checks are "not evaluated", and the reason names the raster. Before, they used
+  the default of pypulseq (10 µs) without a message: a file built with 4 µs and
+  without the `GradientRasterTime` line passed `gradient.slew.axis` with 18.79
+  T/m/s, 2.5 times less than its real 46.97 T/m/s. The four specifications stay
+  version 1. The checks of a file that declares its rasters do not change.
 - **Gradient checks**: `gradient.amplitude.axis`, `gradient.slew.axis` and
   `gradient.amplitude.any-orientation` convert the measured values with the
   gamma of the target, the same gamma as the limits, not with a fixed
