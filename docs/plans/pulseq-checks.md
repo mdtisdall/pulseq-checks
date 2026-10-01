@@ -5,7 +5,9 @@ direction of travel, not a verified dictionary match.
 
 Status: step 2 is done (2026-09-30). Version 1 is the release `0.1.0rc1`
 (tag `v0.1.0rc1`), made by the implementation plan
-`docs/plans/pulseq-checks-v1.md`, whose section 8 gives the results. The user
+`docs/plans/pulseq-checks-v1.md`, whose section 8 gives the results. The
+release `0.1.0rc2` (tag `v0.1.0rc2`) adds the findings of each check and
+fixes of the gradient checks (`CHANGELOG.md`). The user
 answered the open decisions on 2026-09-30 (section 11); R6 was changed during
 the implementation. This document gives the concepts, the structure and the
 decisions.
@@ -614,11 +616,14 @@ repository has step 2 and a part of step 4.
    4. Compare the results of the new timing, gradient and PNS checks with the
       current checks of the cards of pulseq-reports, before step 1 removes
       them. Done (#16, `docs/comparison.md`).
-   5. Make a tag that pulseq-reports can pin. `v0.1.0rc1`.
+   5. Make a tag that pulseq-reports can pin. `v0.1.0rc1`, then
+      `v0.1.0rc2` (the findings of each check, and the fixes of the gradient
+      checks that pulseq-reports also has in its copies).
 3. **Step 3 of the source (in pulseq-reports).** pulseq-reports uses this
    package, removes its copies of the moved modules, exports `HardwareLimits`
    again, and adds the check summary card and `--fail-on-check`. It needs the
-   tag of step 2.5.
+   tag `v0.1.0rc2` or a later tag: with `v0.1.0rc1`, the removal of the
+   copies also removes the fixes of pulseq-reports #105 and #106.
 4. **Later.** More kinds of checks (section 6), more profile readers, JUnit
    output, and proposals to pypulseq.
 

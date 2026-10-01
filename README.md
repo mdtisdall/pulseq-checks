@@ -14,7 +14,7 @@ not give is "not evaluated". It is never a pass.
 With uv, from the git URL and the tag:
 
 ```
-uv add "pulseq-checks @ git+https://github.com/mdtisdall/pulseq-checks@v0.1.0rc1"
+uv add "pulseq-checks @ git+https://github.com/mdtisdall/pulseq-checks@v0.1.0rc2"
 ```
 
 The package needs pypulseq 1.5.0.post1 with four commits that are not in a
