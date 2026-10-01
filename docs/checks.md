@@ -68,7 +68,7 @@ Peak gradient amplitude of each logical axis
 
 Peak gradient slew rate of each logical axis
 
-**Version:** 1
+**Version:** 2
 
 **Cost class:** fast
 
@@ -78,7 +78,7 @@ Peak gradient slew rate of each logical axis
 
 **Models:** None
 
-**Limit:** opts.max_slew of the target profile, in T/m/s (converted from the unit of the profile with the gamma of its Opts). The same limit applies to each axis.
+**Limit:** opts.max_slew of the target profile, in T/m/s (converted from the unit of the profile with the gamma of its Opts). A profile that gives opts.max_grad and opts.rise_time in place of opts.max_slew gives the slew limit max_grad / rise_time, the value that pp.Opts calculates. The same limit applies to each axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
 

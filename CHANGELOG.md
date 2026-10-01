@@ -33,6 +33,18 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   this version still reads format 1: a result of format 1 has no findings.
 - **The run function gives "error"** for a result whose `findings` is not a
   tuple of `Finding`, or whose `findings_omitted` is not an `int` of 0 or more.
+- A profile that gives both `opts.max_slew` and `opts.rise_time` (from the
+  profile file or from the `.asc` file) is an error. `pp.Opts` replaced
+  `max_slew` with `max_grad / rise_time` without a message.
+
+### Fixed
+
+- **`gradient.slew.axis` version 2**: a profile that gives `opts.max_grad` and
+  `opts.rise_time` and no `opts.max_slew` gives the slew limit `max_grad /
+  rise_time`, the value that `pp.Opts` calculates. Before, the check was "not
+  evaluated" and `hardware_limits` was None, although `docs/usage.md` said that
+  `rise_time` gives the slew limit. `TargetProfile.has_value("opts.max_slew")`
+  is true for such a profile.
 
 ## 0.1.0rc1 (2026-09-30)
 

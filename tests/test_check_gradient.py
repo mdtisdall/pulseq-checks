@@ -382,6 +382,34 @@ def test_a_target_with_only_max_slew_gives_max_grad_as_nan(monkeypatch):
     assert call["limits"].label == "only slew"
 
 
+@pytest.mark.parametrize(
+    ("rise_time", "limit", "state"),
+    [(100e-6, 300.0, State.PASS), (200e-6, 150.0, State.FAIL)],
+)
+def test_max_grad_with_rise_time_gives_the_slew_limit_max_grad_over_rise_time(
+    monkeypatch, rise_time, limit, state
+):
+    """The peak slew of `peak_sequence` is 200 T/m/s. The limit is 30 mT/m / rise_time."""
+    install(monkeypatch, SLEW_AXIS)
+
+    matrix = run_checks(peak_sequence(), [make_profile(max_grad=30.0, rise_time=rise_time)])
+
+    (result,) = matrix.results
+    assert result.state is state
+    assert result.limit == pytest.approx(limit)
+    assert result.value == pytest.approx(200.0)
+
+
+def test_rise_time_without_max_grad_gives_not_evaluated_for_the_slew(monkeypatch):
+    install(monkeypatch, SLEW_AXIS)
+
+    matrix = run_checks(peak_sequence(), [make_profile(rise_time=100e-6)])
+
+    (result,) = matrix.results
+    assert result.state is State.NOT_EVALUATED
+    assert "opts.max_slew" in result.reason
+
+
 def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp_path):
     """`gradient_limits` runs one time for each target, over the whole file, with the hardware
     limits of the target and never with None."""
@@ -461,7 +489,7 @@ def test_the_spec_sets_each_field(check):
             AMPLITUDE_ANY_ORIENTATION: "gradient.amplitude.any-orientation",
         }[check]
     )
-    assert spec.version == 1
+    assert spec.version == (2 if check is SLEW_AXIS else 1)
     assert spec.cost == "fast"  # task 8.3 of the plan, from scripts/budget.py
     assert spec.url is None
     assert spec.models == ()

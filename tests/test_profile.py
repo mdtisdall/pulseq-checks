@@ -561,6 +561,49 @@ def test_hardware_limits_need_both_max_grad_and_max_slew(write_json, given):
     assert read_profile(path).hardware_limits is None
 
 
+def test_max_grad_with_rise_time_gives_the_slew_limit_that_pp_opts_calculates(tmp_path):
+    """pp.Opts sets max_slew to max_grad / rise_time: 30 mT/m / 200 us = 150 T/m/s."""
+    path = tmp_path / "profile.toml"
+    path.write_text(
+        'format = 1\nname = "Rise"\n\n[opts]\n'
+        'max_grad = 30\ngrad_unit = "mT/m"\nrise_time = 200e-6\n',
+        encoding="utf-8",
+    )
+
+    profile = read_profile(path)
+
+    assert profile.has_value("opts.max_slew")
+    assert "opts.max_slew" not in profile.sources
+    assert profile.hardware_limits is not None
+    assert profile.hardware_limits.max_grad_mt_per_m == pytest.approx(30)
+    assert profile.hardware_limits.max_slew_t_per_m_per_s == pytest.approx(150)
+
+
+def test_rise_time_without_max_grad_does_not_give_the_slew_limit(write_json):
+    """pp.Opts would divide its default max_grad by rise_time: a default, so not given."""
+    profile = read_profile(write_json({**BASE, "opts": {"rise_time": 200e-6}}))
+
+    assert not profile.has_value("opts.max_slew")
+    assert profile.hardware_limits is None
+
+
+def test_max_slew_with_rise_time_is_an_error_because_pp_opts_replaces_max_slew(write_json):
+    data = {"max_grad": 30, "grad_unit": "mT/m", "max_slew": 150, "rise_time": 200e-6}
+
+    with pytest.raises(ProfileError, match=r"profile.json.*opts\.max_slew.*opts\.rise_time"):
+        read_profile(write_json({**BASE, "opts": data}))
+
+
+def test_max_slew_from_the_asc_reader_with_rise_time_from_the_profile_is_an_error(
+    install_reader, write_json
+):
+    install_reader(FakeReader(ASC_SECTIONS, ASC_SOURCES))
+    data = {**BASE, "asc": "gpa.asc", "asc_gradient_mode": "fast", "opts": {"rise_time": 2e-4}}
+
+    with pytest.raises(ProfileError, match=r"opts\.max_slew.*gpa\.asc \(fast\).*'profile'"):
+        read_profile(write_json(data))
+
+
 def test_a_profile_with_the_name_only_has_no_default_value():
     profile = read_profile(PROFILES / "minimal.toml")
 

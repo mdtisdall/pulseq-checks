@@ -32,6 +32,10 @@ _TOP_KEYS = frozenset({"format", "name", "vendor", "asc", "asc_gradient_mode"})
 _SECTIONS = ("opts", "rasters", "models", "acoustic")
 # The label of the values of the profile file in `TargetProfile.sources`.
 _PROFILE_LABEL = "profile"
+# The value paths that pp.Opts calculates from other values: pp.Opts sets max_slew to
+# max_grad / rise_time when it gets rise_time. All the values of the tuple are necessary,
+# because pp.Opts uses its default max_grad when the profile does not give one.
+_CALCULATED = {"opts.max_slew": ("opts.max_grad", "opts.rise_time")}
 
 
 class ProfileError(CheckRunError):
@@ -46,8 +50,8 @@ class TargetProfile:
     default (rule 6). `sources` maps the value path of each value that a source gives
     ("opts.max_grad", "rasters.GradientRasterTime", "models.pns.safe",
     "acoustic.resonances") to "profile" or to the label of the `.asc` reader.
-    `hardware_limits` comes from `opts.max_grad` and `opts.max_slew` (both necessary), in
-    mT/m and T/m/s, with the label `name`. `rasters` has the reserved names of
+    `hardware_limits` comes from `opts.max_grad` and the slew limit (both necessary, see
+    `has_value`), in mT/m and T/m/s, with the label `name`. `rasters` has the reserved names of
     `RASTER_OPTS`. `models` maps a model name ("pns.safe") to the parameters that its model
     `read` returned."""
 
@@ -73,8 +77,14 @@ class TargetProfile:
         return pp.Opts(**keywords)
 
     def has_value(self, path: str) -> bool:
-        """True when a source gives the value path `path` (a key of `sources`)."""
-        return path in self.sources
+        """True when a source gives the value path `path` (a key of `sources`), or gives all
+        the values from which pp.Opts calculates it: `opts.max_slew` is given also by
+        `opts.max_grad` with `opts.rise_time` (max_grad / rise_time). `sources` has only the
+        values that a source gives."""
+        if path in self.sources:
+            return True
+        needs = _CALCULATED.get(path)
+        return needs is not None and all(p in self.sources for p in needs)
 
 
 def _opts_keys() -> frozenset[str]:
@@ -271,6 +281,13 @@ def read_profile(path: str | Path) -> TargetProfile:
         model_sections.update(asc_models)
         unused.extend(u for u in asc_unused if u not in unused)
 
+    # pp.Opts replaces max_slew with max_grad / rise_time, without a message.
+    if "opts.max_slew" in sources and "opts.rise_time" in sources:
+        fail(
+            f"opts.max_slew (given by {sources['opts.max_slew']!r}) and opts.rise_time (given "
+            f"by {sources['opts.rise_time']!r}) both give the slew limit: give only one of them"
+        )
+
     models: dict[str, Mapping[str, Any]] = {}
     for model_name, section in model_sections.items():
         try:
@@ -300,7 +317,7 @@ def read_profile(path: str | Path) -> TargetProfile:
     # used, for the hardware limits here.
     try:
         built = profile.make_opts()
-        if "max_grad" in opts and "max_slew" in opts:
+        if profile.has_value("opts.max_grad") and profile.has_value("opts.max_slew"):
             limits = HardwareLimits(
                 max_grad_mt_per_m=built.max_grad / built.gamma * 1e3,
                 max_slew_t_per_m_per_s=built.max_slew / built.gamma,
