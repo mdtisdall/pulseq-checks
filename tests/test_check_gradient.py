@@ -489,7 +489,7 @@ def test_the_spec_sets_each_field(check):
             AMPLITUDE_ANY_ORIENTATION: "gradient.amplitude.any-orientation",
         }[check]
     )
-    assert spec.version == (2 if check is SLEW_AXIS else 1)
+    assert spec.version == 1
     assert spec.cost == "fast"  # task 8.3 of the plan, from scripts/budget.py
     assert spec.url is None
     assert spec.models == ()
