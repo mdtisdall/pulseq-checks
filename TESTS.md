@@ -2459,6 +2459,45 @@ with `gamma = 10e6`, and compares the limits and `make_opts().max_grad`.
 
 **Assumptions:** None.
 
+#### `test_max_grad_with_rise_time_gives_the_slew_limit_that_pp_opts_calculates`
+
+**Checks:** A TOML profile with `max_grad = 30` mT/m and `rise_time = 200e-6` and no
+`max_slew` gives `opts.max_slew` (`has_value`), has no source for `opts.max_slew`, and
+has `hardware_limits` of 30 mT/m and 150 T/m/s (`max_grad / rise_time`, the value of
+`pp.Opts`).
+
+**How:** The test writes a TOML profile with these `[opts]` and reads it.
+
+**Assumptions:** None.
+
+#### `test_rise_time_without_max_grad_does_not_give_the_slew_limit`
+
+**Checks:** A profile with `rise_time` and no `max_grad` does not give `opts.max_slew`,
+and `hardware_limits` is None. `pp.Opts` would divide its default `max_grad`.
+
+**How:** The test reads a profile with `rise_time` only.
+
+**Assumptions:** None.
+
+#### `test_max_slew_with_rise_time_is_an_error_because_pp_opts_replaces_max_slew`
+
+**Checks:** A profile that gives both `max_slew` and `rise_time` is a `ProfileError` that
+names the file and both values.
+
+**How:** The test reads a JSON profile with both keys and matches the message.
+
+**Assumptions:** None.
+
+#### `test_max_slew_from_the_asc_reader_with_rise_time_from_the_profile_is_an_error`
+
+**Checks:** `max_slew` from the `.asc` reader and `rise_time` from the profile file is a
+`ProfileError` that names both sources.
+
+**How:** A `FakeReader` gives the GPA limits of the mode "fast"; the profile gives
+`rise_time`. The test matches the message.
+
+**Assumptions:** None.
+
 #### `test_a_profile_with_the_name_only_has_no_default_value`
 
 **Checks:** Rule 6: a profile with `format` and `name` only has None for `opts`,
@@ -4244,6 +4283,28 @@ the call.
 
 **Assumptions:** The same as in the test above.
 
+#### `test_max_grad_with_rise_time_gives_the_slew_limit_max_grad_over_rise_time`
+
+**Checks:** A target with `opts.max_grad` 30 mT/m and `opts.rise_time` and no
+`opts.max_slew` gets a result for `gradient.slew.axis` with the limit `max_grad /
+rise_time`: a pass at 100 µs (300 T/m/s) and a fail at 200 µs (150 T/m/s), for a peak slew
+of 200 T/m/s.
+
+**How:** `run_checks` with a `TargetProfile` without `hardware_limits`, so the limit comes
+from `_hardware_limits` and the `pp.Opts` of the target. Parametrized over the two rise
+times.
+
+**Assumptions:** None.
+
+#### `test_rise_time_without_max_grad_gives_not_evaluated_for_the_slew`
+
+**Checks:** A target with `opts.rise_time` and no `opts.max_grad` gets "not evaluated"
+for `gradient.slew.axis`, with `opts.max_slew` in the reason.
+
+**How:** `run_checks` with the slew rule only.
+
+**Assumptions:** None.
+
 #### `test_the_three_checks_share_one_measurement_for_each_target`
 
 **Checks:** For a `.seq` file and two targets, `gradient_limits` runs one time for each
@@ -4299,8 +4360,8 @@ later pypulseq that stores a rotation in another way (see `refuse_rotations`).
 
 #### `test_the_spec_sets_each_field`
 
-**Checks:** For each of the three rules, the `CheckSpec` has the expected ID, version 1,
-cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
+**Checks:** For each of the three rules, the `CheckSpec` has the expected ID, the version
+(2 for the slew rule, 1 for the other two), cost class `"fast"` (task 8.3 of the plan), `url` None, no model, the expected input (`opts.max_slew` for the slew
 rule, `opts.max_grad` for the other two), and a non-empty title, quantity, limit,
 tolerance and pass condition.
 

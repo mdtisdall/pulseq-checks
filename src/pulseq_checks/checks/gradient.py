@@ -52,7 +52,9 @@ def _hardware_limits(ctx: RunContext) -> HardwareLimits:
     `ctx.hardware_limits` when it is not None (both limits of the profile, or the limits of
     `seq.system` with the opt-in of decision 4). Otherwise the target gives only one of
     `opts.max_grad` and `opts.max_slew` (the run function gives "not evaluated" to a rule
-    that needs the other one), and the other limit is nan. The label is the name of the
+    that needs the other one), and the other limit is nan. `opts.max_slew` is given also by
+    `opts.max_grad` with `opts.rise_time` (`TargetProfile.has_value`), and then the Opts has
+    max_grad / rise_time in `max_slew`. The label is the name of the
     target."""
     if ctx.hardware_limits is not None:
         return ctx.hardware_limits
@@ -174,7 +176,7 @@ class _AmplitudeAxis(_GradientCheck):
 class _SlewAxis(_GradientCheck):
     spec = CheckSpec(
         id="gradient.slew.axis",
-        version=1,
+        version=2,
         title="Peak gradient slew rate of each logical axis",
         quantity=(
             "For each logical axis x, y and z, the peak slew rate in T/m/s: the largest of two "
@@ -204,7 +206,9 @@ class _SlewAxis(_GradientCheck):
         models=(),
         limit=(
             "opts.max_slew of the target profile, in T/m/s (converted from the unit of the "
-            "profile with the gamma of its Opts). The same limit applies to each axis."
+            "profile with the gamma of its Opts). A profile that gives opts.max_grad and "
+            "opts.rise_time in place of opts.max_slew gives the slew limit max_grad / "
+            "rise_time, the value that pp.Opts calculates. The same limit applies to each axis."
         ),
         tolerance=_TOLERANCE,
         pass_condition=(

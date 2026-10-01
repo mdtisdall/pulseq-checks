@@ -29,7 +29,7 @@ The checks of version 1:
 | `timing.rasters` | the four `[rasters]` values |
 | `timing.pypulseq` | the four `[rasters]` values, and `opts.rf_dead_time`, `opts.rf_ringdown_time` and `opts.adc_dead_time` |
 | `gradient.amplitude.axis` | `opts.max_grad` |
-| `gradient.slew.axis` | `opts.max_slew` |
+| `gradient.slew.axis` | `opts.max_slew`, or `opts.max_grad` and `opts.rise_time` |
 | `gradient.amplitude.any-orientation` | `opts.max_grad` |
 | `pns.safe` | the SAFE parameters, `[models.pns.safe]` (from the profile file or from an `.asc` file) |
 
@@ -113,12 +113,18 @@ Notes:
   reads the sequence, but no check uses such a value: the check gives "not
   evaluated". The one use of a default is `gamma`, for the conversion of the
   units of `max_grad` and `max_slew` (pypulseq: 42.576 MHz/T).
-- `rise_time`, when given, makes pypulseq calculate the slew limit as
-  `max_grad / rise_time`, and it replaces `max_slew`. Do not give it with
-  `max_slew`.
+- `rise_time` with `max_grad` gives the slew limit: pypulseq calculates
+  `max_slew` as `max_grad / rise_time`. The checks then use this value as
+  `opts.max_slew` (`TargetProfile.has_value("opts.max_slew")` is true), but
+  `sources` has no entry for `opts.max_slew`. `rise_time` without `max_grad`
+  does not give a slew limit, because pypulseq would divide its default
+  `max_grad`.
+- A profile that gives both `max_slew` and `rise_time` (from the profile file
+  or from the `.asc` file) is an error, because pypulseq replaces `max_slew`
+  with `max_grad / rise_time` without a message.
 - The limits of the gradient checks are in mT/m and T/m/s, whatever unit the
   profile uses. `TargetProfile.hardware_limits` has them when the profile
-  gives both `max_grad` and `max_slew`.
+  gives both `max_grad` and the slew limit (`max_slew`, or `rise_time`).
 - In JSON, a `null` value is an error.
 
 ### 2.3 `[rasters]`
@@ -192,8 +198,9 @@ The GPA limits:
 A value that the `.asc` file does not have is not given. That is not an error:
 the profile file can give it. A value that both files give is an error (see
 [2.7](#27-the-rules)). Thus a profile that selects a mode does not give
-`max_grad`, `max_slew`, `grad_unit` or `slew_unit`, and a profile with an
-`.asc` file that has SAFE parameters does not give `[models.pns.safe]`.
+`max_grad`, `max_slew`, `grad_unit` or `slew_unit`, nor `rise_time` (see
+[2.2](#22-opts)), and a profile with an `.asc` file that has SAFE parameters
+does not give `[models.pns.safe]`.
 
 The source of each value is recorded. For a GPA limit it is the file name
 with the mode, for example `MP_GPA_K2309_2250V_951A_AS82.asc (fast)`.
@@ -529,7 +536,7 @@ Reads a [target profile](#2-the-target-profile). Raises `ProfileError`.
 |---|---|
 | `name`, `vendor`, `format_version`, `source_path` | From the file. `source_path` is the resolved path. |
 | `opts` | The `[opts]` values (and the `.asc` limits) as a mapping, or `None`. |
-| `hardware_limits` | A `HardwareLimits` (`max_grad_mt_per_m`, `max_slew_t_per_m_per_s`, `label`), or `None`. It is there only when the profile gives both `opts.max_grad` and `opts.max_slew`. |
+| `hardware_limits` | A `HardwareLimits` (`max_grad_mt_per_m`, `max_slew_t_per_m_per_s`, `label`), or `None`. It is there only when the profile gives both `opts.max_grad` and the slew limit (`opts.max_slew`, or `opts.rise_time`). |
 | `rasters` | The `[rasters]` values by their reserved names, or `None`. |
 | `models` | A mapping from a model name (`"pns.safe"`) to the checked parameters. |
 | `acoustic_resonances` | A tuple of (frequency, bandwidth) pairs, or `None`. |
