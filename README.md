@@ -62,7 +62,9 @@ because the command did not name it.
 A result gives the worst value of a check. It can also have findings: one for
 each problem that the check found, with a code, a message, the block and the
 time, and the values. `timing.pypulseq` gives one finding for each error of
-pypulseq's `check_timing`. A plugin check can give its own.
+pypulseq's `check_timing`, and `timing.rasters` gives one finding for each
+raster that differs from the target or that the file does not declare
+correctly. A plugin check can give its own.
 
 The summary on the console gives only the number of findings of each result.
 To see them there, add `--show-findings`. To pass them to another tool, write

@@ -59,8 +59,10 @@ A result can also have findings: one finding for each problem that the check
 found, not only the worst value. Each finding has a code (the kind of
 problem), a message for a person, a location (the block ID and the time in
 seconds) and data (the values of the problem, by name). `timing.pypulseq`
-gives one finding for each error of `check_timing` of pypulseq. The other
-checks of this package give no findings. A plugin check can give its own
+gives one finding for each error of `check_timing` of pypulseq, and
+`timing.rasters` gives one finding for each raster that differs from the
+target or that the file does not declare correctly. The other checks of this
+package give no findings. A plugin check can give its own
 ([section 7](#a-check-rule)). The specification of a check in
 [`checks.md`](checks.md) says what its findings are.
 
@@ -1140,10 +1142,11 @@ reader.
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
-- **Findings from one check only.** Only `timing.pypulseq` gives findings.
-  The other checks give their worst value and its location only. The checks
-  that can give findings later are in [`TODO.md`](../TODO.md). A plugin check
-  can give findings now ([section 7](#a-check-rule)).
+- **Findings from the two timing checks only.** Only `timing.pypulseq` and
+  `timing.rasters` give findings. The other checks give their worst value and
+  its location only. The checks that can give findings later are in
+  [`TODO.md`](../TODO.md). A plugin check can give findings now
+  ([section 7](#a-check-rule)).
 - **No convention checks** (handedness, axis mapping), and no worst-case slew
   under rotation. They come later.
 - **No JUnit output.**

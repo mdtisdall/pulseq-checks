@@ -3901,6 +3901,10 @@ duration is not on the raster, and it gives three RASTER errors. The expected va
 `data` are computed by hand from the parameters of the sequences. The tests compare a
 message with the text that `print_error_report` of pypulseq prints.
 
+The tests of the findings of `timing.rasters` use the same files and the same direct calls
+as its other tests. The expected values of `data` are the target rasters and the factors
+that the test gives to the declared rasters.
+
 #### `test_equal_rasters_pass`
 
 **Checks:** With a file that declares the rasters of the target, the result is "pass"
@@ -3913,6 +3917,8 @@ pass or a fail) starts with `GradientRasterTime: `.
 
 **Assumptions:** When the deviations of all rasters are equal, the result shows the first
 raster (the gradient raster). The test checks only the start of the reason text.
+
+The result of a pass also has no findings and no omitted findings.
 
 #### `test_equal_rasters_fail_when_one_raster_differs`
 
@@ -3964,10 +3970,12 @@ directions.
 
 **How:** The test sets the four definitions of a `pp.Sequence` to the target values times
 a factor (1 ± 5e-9 and 1 ± 1e-7), runs `RASTERS.run` with a `RunContext`, and checks the
-state.
+state. It also checks the number of findings: none for a raster within the tolerance, and
+one for each of the four rasters outside it.
 
 **Assumptions:** The test sets the definitions in the object and does not write a file, so
-it does not test the nine-digit rounding of the file itself. The tolerance is 1e-8.
+it does not test the nine-digit rounding of the file itself. The tolerance is 1e-8. All
+four rasters have the same factor, so the findings are all or none.
 
 #### `test_a_raster_that_the_file_does_not_declare_gives_error`
 
@@ -3998,6 +4006,103 @@ in the reason.
 pypulseq uses a declared raster when it reads the file. The other three definitions are
 not set, so the reason also names them as not declared; the test checks only that it names
 the gradient raster, and not its complete text.
+
+#### `test_a_raster_that_differs_gives_one_mismatch_finding`
+
+**Checks:** A file where one of the four rasters is 1.5 times the raster of the target
+gives "fail" and exactly one finding with the code RASTER_MISMATCH and no location. Its
+`data` has the name of the raster, `file_s` (1.5 times the target), `target_s` and the
+deviation 0.5, all Python types. Its message is `<name>: <F> s in the file, <T> s on the
+target`, and it is the reason of the result, which keeps its value (the file raster) and
+its limit (the target raster).
+
+**How:** For each of the four names, the test writes the file, runs `timing.rasters`
+through `run_checks`, and compares the finding with the expected values (the numbers to a
+relative 1e-6, because the file keeps nine digits) and the types with `type(v) in
+(str, int, float, bool, NoneType)`. The message is built from the value of the result.
+
+**Assumptions:** The test builds the expected message with the same form as the check, so
+it tests that the message and the reason are the same text and that the numbers are those
+of the result, not the wording of the text.
+
+#### `test_two_rasters_that_differ_give_two_findings_in_the_order_of_the_rasters`
+
+**Checks:** When two rasters differ, the result is "fail" with two RASTER_MISMATCH
+findings, in the order GradientRasterTime, RadiofrequencyRasterTime, AdcRasterTime,
+BlockDurationRaster, and not in the order of the deviation. The value and the limit are
+still those of the raster with the largest deviation.
+
+**How:** The test has two cases. In the first, the RF raster is 1.1 times and the ADC
+raster is 1.5 times the target, so the later raster of the two (ADC) has the larger
+deviation. In the second, the gradient raster is 2 times and the block duration raster 1.1
+times, so the earlier raster of the two has the larger deviation. The test checks the names of the findings in the
+order, their `data` and that the reason and the limit are those of the worst raster.
+
+**Assumptions:** The rasters that the test does not change equal the target, so they give
+no finding.
+
+#### `test_a_raster_that_the_file_does_not_declare_gives_one_finding`
+
+**Checks:** A file that does not declare one of the four rasters gives "error" and one
+finding with the code RASTER_NOT_DECLARED, no location, the message `the file does not
+declare <name>` (also the reason of the result) and `data` with the name and `target_s`
+only.
+
+**How:** For each name, the test removes the definition before it writes the file, runs the
+check, and compares the finding.
+
+**Assumptions:** As in `test_a_raster_that_the_file_does_not_declare_gives_error`: the file
+has format 1.5.0, and the warning of pypulseq for a missing block duration raster is
+ignored.
+
+#### `test_a_declared_raster_that_is_not_valid_gives_one_invalid_finding`
+
+**Checks:** A declared gradient raster that is a string, a list of two numbers (an array),
+a list with one number, a bool, zero, negative (also in an array of one element), "not a
+number" or infinite (both signs) gives "error" and one RASTER_INVALID finding with no
+location and the message that is the reason of the result. Its `data` has, in this order,
+the name, `declared` and `target_s`. `declared` is a Python `float` when the value is one
+number (also when it is zero, negative or not finite), and else the `repr` text of the value
+(a `str`).
+
+**How:** The test sets the four definitions of a `pp.Sequence` to the target values and then
+the gradient raster to the case, runs `RASTERS.run` with a `RunContext`, and checks the
+finding. For "not a number", it checks `math.isnan`, because nan is not equal to itself.
+
+**Assumptions:** The test sets the values in the object and does not write a file, as the
+test of the error does. An array of one element is a number: its `item()` is used, as in
+the check. The `repr` text of a string has quotes, so it is never one of the strings "inf",
+"-inf" and "nan" that `Finding` refuses; the test does not check this separately.
+
+#### `test_an_error_lists_the_mismatches_of_the_other_rasters_too`
+
+**Checks:** For a file with a gradient raster of 1.5 times the target, no ADC raster and a
+block duration raster of 2 times the target, the result is "error" with three findings, in
+the order of the rasters: RASTER_MISMATCH of the gradient raster, RASTER_NOT_DECLARED of the
+ADC raster and RASTER_MISMATCH of the block duration raster. No finding has a location. The
+reason is only the text of the missing raster, and the value and the limit are None.
+
+**How:** The test writes the file, runs `timing.rasters` through `run_checks`, and compares
+the codes, the names and the `data` of the findings and the three fields of the result.
+
+**Assumptions:** The test removes the ADC raster and not the block duration raster, so it
+does not need the filter for the warning of pypulseq about a missing block duration raster.
+
+#### `test_the_findings_of_an_error_survive_the_json_round_trip`
+
+**Checks:** A result with the state "error" and three findings (a RASTER_INVALID with a
+text value, a RASTER_INVALID with a "not a number" value and a RASTER_MISMATCH) is the same
+after `to_json` and `from_json` of the matrix: the codes, the messages, the locations (None)
+and the `data`, with the nan as a nan and the text `'abc'` as that text, and the reason.
+
+**How:** The test makes a `pp.Sequence` in memory with the gradient raster `"abc"`, the RF
+raster `nan`, the ADC raster of the target and a block duration raster of 2 times the target,
+runs `timing.rasters` through `run_checks`, and reads the JSON back. It compares the
+findings with `==`, except the nan one, where it checks `math.isnan` and compares the other
+fields.
+
+**Assumptions:** `Finding` with a nan in its data is not equal to itself, so the test cannot
+compare the whole matrix. The JSON form of the nan is tested in `test_results.py`.
 
 #### `test_rasters_are_not_evaluated_without_a_target_raster`
 
@@ -4192,14 +4297,26 @@ empty. The cost classes are the ones of task 8.3 of the plan, from `scripts/budg
 #### `test_the_spec_of_timing_pypulseq_has_findings_and_keeps_version_1`
 
 **Checks:** The specification of `timing.pypulseq` has the version 1 and a `findings` text
-that is not empty and names each error type that pypulseq has a message template for. The
-specification of `timing.rasters` has no `findings` text.
+that is not empty and names each error type that pypulseq has a message template for.
 
-**How:** The test reads the fields of the two specifications, and checks the names of the
-keys of `error_messages` of pypulseq in the text.
+**How:** The test reads the fields of the specification, and checks the names of the keys of
+`error_messages` of pypulseq in the text.
 
 **Assumptions:** A newer pypulseq with another template needs a change of the text; the
 test finds it. The test does not check the other words of the text.
+
+#### `test_the_spec_of_timing_rasters_has_findings_and_keeps_version_1`
+
+**Checks:** The specification of `timing.rasters` has the version 1 and a `findings` text
+that is not empty and names the three codes RASTER_NOT_DECLARED, RASTER_INVALID and
+RASTER_MISMATCH.
+
+**How:** The test reads the fields of the specification and looks for the three codes in the
+text.
+
+**Assumptions:** The test checks the names of the codes only, not the other words of the
+text. That each code in the text is the code that the check gives is tested by the tests of
+the findings.
 
 #### `test_the_ids_and_inputs_of_the_specs`
 

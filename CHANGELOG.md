@@ -33,6 +33,17 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   blocks with 4 x 10^5 errors, the check takes 17.9 s instead of 15.3 s. The
   JSON result with all findings is about 200 MB (0.5 MB with `--max-findings
   1000`).
+- **`timing.rasters` gives its findings**: one finding for each of the four
+  rasters that has a problem, in the order GradientRasterTime,
+  RadiofrequencyRasterTime, AdcRasterTime, BlockDurationRaster. The codes are
+  `RASTER_NOT_DECLARED` (the file does not declare the raster),
+  `RASTER_INVALID` (the file declares a value that is not one positive finite
+  number) and `RASTER_MISMATCH` (the raster of the file differs from the
+  raster of the target by more than the tolerance). `data` has the name of the
+  raster and the values in seconds. A result with the state "error" lists every
+  raster problem, also the mismatches of the other rasters. The location is
+  none. The specification version stays 1, because the verdict does not
+  change.
 
 ### Changed
 
