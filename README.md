@@ -100,6 +100,6 @@ for result in matrix.results:
 
 - [`docs/usage.md`](docs/usage.md): the target profile, the check
   configuration, the command, the Python API, the result JSON, how to pass the
-  findings to another tool, and how to write a plugin check (also one that
-  gives findings).
+  findings to another tool, how to write a plugin check (also one that gives
+  findings), and the measurement modules that a check can use.
 - [`docs/checks.md`](docs/checks.md): the specification of each check.

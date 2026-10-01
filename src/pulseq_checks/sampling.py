@@ -15,11 +15,12 @@ The waveform is the polyline of pypulseq's `Sequence.get_gradients()`, in Hz/m:
 3. The values. Straight lines between consecutive points, also across a gap between
    two events. 0 before the first point and after the last point.
 
-`GradientSampler.block_samples` gives a second form of the same waveform, for the PNS
-lane (section 4.1, item 3, of docs/plans/diagram-lanes.md): each block on its own, at
-the local times `(j + 0.5) * dt` from the block start, with the rule of the browser's
-`PnsLanes` (`assets/pns_lanes.js`): the block's own event, 0 outside it. It has no line
-across a gap, and no time drift from the block start sums.
+`GradientSampler.block_samples` gives a second form of the same waveform, for the SAFE
+PNS model (`pns_levels.pns_levels`): each block on its own, at the local times
+`(j + 0.5) * dt` from the block start, with the values of the block's own event and 0
+outside it. It has no line across a gap between two events, and its sample times do not
+drift with the sums of the block durations, so one block gives the same samples wherever
+it is in the sequence.
 """
 
 import numpy as np
@@ -116,7 +117,7 @@ class GradientSampler:
 
         # The events of `axis` in that block range, plus the nearest one before it and
         # the nearest one after it, so that a gap at the edge of the range interpolates
-        # correctly (section 4.3 of docs/plans/cards-at-scale.md).
+        # between the same two points as it does for the whole file.
         lo_pos = int(np.searchsorted(event_blocks, lo_block, side="left"))
         hi_pos = int(np.searchsorted(event_blocks, hi_block, side="right"))
         blocks = event_blocks[max(lo_pos - 1, 0) : min(hi_pos + 1, event_blocks.size)]
@@ -143,8 +144,7 @@ class GradientSampler:
         (`seq_utils.gradient_offsets`), a straight line between two points, and 0
         before the first point and after the last point. At a local time equal to a
         point time where two points have the same time (a step), the later point's
-        value is used. A block with no event on `axis` gives zeros. This is the rule of
-        `PnsLanes` (`_eventSamples` in assets/pns_lanes.js). It differs from `sample`
+        value is used. A block with no event on `axis` gives zeros. It differs from `sample`
         at a step at a block junction (`add_block` accepts a step up to
         `max_slew * grad_raster_time`), and by the float drift of the block start sums
         (`tests/test_sampling.py`).
@@ -197,8 +197,8 @@ class GradientSampler:
         starts_valid = starts[valid]
 
         def event_samples(event_k: int, count_n: int) -> np.ndarray:
-            """The `count_n` samples (Hz/m) of gradient event `event_k`, cached by
-            `(event_k, count_n, dt)`: the rule of `PnsLanes._eventSamples`."""
+            """The `count_n` samples (Hz/m) of gradient event `event_k`, by the rule of
+            `block_samples`, cached by `(event_k, count_n, dt)`."""
             cache_key = (event_k, count_n, dt)
             samples = cache.get(cache_key)
             if samples is not None:
@@ -211,10 +211,9 @@ class GradientSampler:
                 points_t = self._delay[event_k] + self._offsets[at : at + num_points]
                 points_v = self._amp[at : at + num_points]
                 t = (np.arange(count_n, dtype=np.float64) + 0.5) * dt
-                # The point at or before `t`: the largest p with points_t[p] <= t,
-                # equivalent to the JS sequential merge (both a pure function of `t`
-                # and `points_t`, so the two agree on every comparison, sample by
-                # sample).
+                # The point at or before `t`: the largest p with points_t[p] <= t. It
+                # depends only on `t` and `points_t`, so a tool that walks the points and
+                # the samples in order with the same comparisons gets the same p.
                 p = np.searchsorted(points_t, t, side="right") - 1
                 p = np.clip(p, 0, num_points - 1)
                 t0 = points_t[p]
@@ -258,7 +257,8 @@ class GradientSampler:
 
 
 # A block is on the raster when its duration is within this many samples of a whole
-# number of samples: the rule of `PnsLanes.decode` (`onRaster`) in assets/pns_lanes.js.
+# number of samples. Otherwise `pns_levels.pns_levels` samples the whole file with
+# `GradientSampler.sample`, not block by block.
 ON_RASTER_TOLERANCE = 1e-6
 
 
@@ -266,8 +266,9 @@ def raster_block_lengths(index: SequenceIndex, dt: float) -> tuple[np.ndarray, b
     """The number of samples of each block, `round(duration / dt)` (int64, length N, in
     play order), and whether every block is on the raster (`ON_RASTER_TOLERANCE`).
 
-    `PnsLanes.decode` computes the same numbers in the browser, so Python and JavaScript
-    agree on where each block's samples are."""
+    The samples of block `i` start at sample `sum(n[:i])` of the whole sequence. A caller
+    that draws the PNS samples of `pns_levels.pns_levels` uses the same numbers to find
+    the samples of a block."""
     return _raster_lengths(index.duration_s, dt)
 
 

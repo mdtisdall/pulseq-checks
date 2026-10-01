@@ -1,10 +1,20 @@
-"""Shared helpers for reading a pypulseq sequence, used by the report cards."""
+"""Helpers that read one event of a pypulseq sequence, and the constants of the
+measurements.
+
+`gradient_offsets` and `gradient_points` give the corner or sample points of a gradient
+event, the points that `grad_limits` and `sampling` join with straight lines.
+`hold_samples` gives the samples of an RF event on a regular raster. No check of this
+package uses it yet: it is for a caller that measures or draws the RF (pulseq-reports,
+for example), and for a later RF check.
+"""
 
 from types import SimpleNamespace
 
 import numpy as np
 
+# The default gamma of `grad_limits` (1H), in Hz/T. A check uses the gamma of its target.
 GAMMA = 42.576e6  # Hz/T
+# The tolerance of a comparison of two times. A segment shorter than this has no slope.
 TIME_TOLERANCE = 1e-9  # s
 
 
