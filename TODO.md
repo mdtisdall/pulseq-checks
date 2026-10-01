@@ -13,18 +13,6 @@
   changes. For `timing.pypulseq` it did not, because the findings do not
   change the verdict (decision D6 of the plan).
 
-- **Port the gradient fixes to pulseq-reports (R8 and R9 of
-  `docs/plans/pulseq-checks.md`).** `grad_limits.py` is shared, and the
-  Gradient limits card of pulseq-reports has both bugs. After the next tag of
-  pulseq-checks: in `src/pulseq_reports/grad_limits.py` (around line 568),
-  divide the junction step by `seq.grad_raster_time`, not by
-  `seq.system.grad_raster_time`. pulseq-reports reads each file with
-  `pp.Sequence()`, so today it divides by 10 µs, and a file with a 4 µs raster
-  gets a junction slew 2.5 times too small. Also port the `gamma` keyword of
-  `gradient_limits`, with the default 42.576 MHz/T; the card does not change.
-  The raster sources (`CheckSpec.rasters`) are in the run function of
-  pulseq-checks only: nothing to port.
-
 - **Unequal rasters (R6 of `docs/plans/pulseq-checks.md`).** Version 1 of
   `timing.rasters` passes only when the rasters of the file equal the
   rasters of the target. A file with a coarser raster (F = k x T) has its
