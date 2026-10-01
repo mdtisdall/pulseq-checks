@@ -27,8 +27,10 @@
   `_safe_gwf_to_pns_chunk`), the `get_block` fix for oversampled arbitrary
   gradients (upstream PR #424), and the read fix of upstream #359. The item
   "Move from the pypulseq fork to a pypulseq release" in the `TODO.md` of
-  pulseq-reports gives each commit and how to change the pin. pulseq-checks
-  and pulseq-reports must pin the same commit. When a pypulseq release has
+  pulseq-reports gives each commit and how to change the pin. pulseq-checks,
+  pulseq-analysis and pulseq-reports all pin the same commit (decision T12 of
+  `docs/plans/pulseq-analysis.md`). When a pypulseq release has
   all four changes: pin that release in `[project] dependencies`, remove
-  `[tool.uv.sources]`, and change `pns_levels.py` to the released name of the
-  chunk function. Do this in the two repositories at the same time.
+  `[tool.uv.sources]`, and change `pns_levels.py` of pulseq-analysis to the
+  released name of the chunk function. Do this in the three repositories at
+  the same time.

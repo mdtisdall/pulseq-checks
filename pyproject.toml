@@ -10,6 +10,7 @@ dependencies = [
     "pypulseq>=1.5.0.post1",
     "numpy",
     "scipy",
+    "pulseq-analysis @ git+https://github.com/mdtisdall/pulseq-analysis@v0.1.0rc2",
 ]
 
 [project.scripts]
@@ -19,7 +20,7 @@ pulseq-check = "pulseq_checks.cli:main"
 siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
 
 [project.entry-points."pulseq_checks.models"]
-"pns.safe" = "pulseq_checks.pns_levels:SAFE_MODEL"
+"pns.safe" = "pulseq_checks.safe_model:SAFE_MODEL"
 
 [project.entry-points."pulseq_checks.checks"]
 "timing.rasters" = "pulseq_checks.checks.timing:RASTERS"
@@ -32,6 +33,9 @@ siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pulseq_checks"]

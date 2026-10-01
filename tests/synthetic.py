@@ -4,8 +4,7 @@ import math
 
 import numpy as np
 import pypulseq as pp
-
-from pulseq_checks.seq_utils import GAMMA
+from pulseq_analysis.seq_utils import GAMMA
 
 SYSTEM = pp.Opts(
     max_grad=28,

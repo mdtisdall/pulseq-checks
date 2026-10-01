@@ -15,7 +15,6 @@ from typing import Any, NoReturn
 import pypulseq as pp
 
 from . import registry
-from .grad_limits import HardwareLimits
 from .results import CheckRunError
 
 # The newest profile format that this reader reads (the "format" key).
@@ -40,6 +39,20 @@ _CALCULATED = {"opts.max_slew": ("opts.max_grad", "opts.rise_time")}
 
 class ProfileError(CheckRunError):
     """A target profile that is missing or not valid: an error of the run (R2)."""
+
+
+@dataclass(frozen=True)
+class HardwareLimits:
+    """The gradient hardware limits that a sequence is compared with.
+
+    `max_grad_mt_per_m` is in mT/m and `max_slew_t_per_m_per_s` in T/m/s. `label` names
+    the limits: the name of a target profile, or "sequence object" (the limits of
+    `seq.system`, decision 4).
+    """
+
+    max_grad_mt_per_m: float
+    max_slew_t_per_m_per_s: float
+    label: str
 
 
 @dataclass(frozen=True)

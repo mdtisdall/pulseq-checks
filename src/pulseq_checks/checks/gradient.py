@@ -2,11 +2,10 @@
 `gradient.slew.axis` and `gradient.amplitude.any-orientation`.
 
 The three rules share one measurement, `gradient_limits` over the whole file, which
-`ctx.measure` calculates one time for each target. `gradient_limits` uses its `limits`
-argument only as a label of its result (the numbers do not depend on it), but the rules never
-give it `None`, because then it would take the limits of `seq.system` (design section 7.2).
-The limit of a rule comes from the `HardwareLimits` of the target, which `_hardware_limits`
-builds for all three rules in one way.
+`ctx.measure` calculates one time for each target. `gradient_limits` has no argument for the
+limits: its numbers do not depend on them. The limit of a rule comes from the
+`HardwareLimits` of the target, which `_hardware_limits` builds for all three rules in one
+way.
 
 A rule that fails also gives each block that is above its limit as a finding. The values of
 each block come from a second measurement, `gradient_blocks` (`block_gradient_values`), which
@@ -17,14 +16,14 @@ from __future__ import annotations
 import math
 
 import numpy as np
-
-from ..grad_limits import (
+from pulseq_analysis.grad_limits import (
     BlockGradientValues,
     GradientLimits,
-    HardwareLimits,
     block_gradient_values,
     gradient_limits,
 )
+
+from ..profile import HardwareLimits
 from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
 
@@ -114,9 +113,7 @@ def _measurement(ctx: RunContext) -> tuple[GradientLimits, HardwareLimits]:
     `HardwareLimits` of the target."""
     limits = _hardware_limits(ctx)
     gamma = _gamma(ctx)
-    measurement = ctx.measure(
-        "gradient_limits", lambda seq: gradient_limits(seq, limits=limits, gamma=gamma)
-    )
+    measurement = ctx.measure("gradient_limits", lambda seq: gradient_limits(seq, gamma=gamma))
     return measurement, limits
 
 

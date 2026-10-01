@@ -5,6 +5,8 @@ from typing import Any
 import numpy as np
 import pypulseq as pp
 import pytest
+from pulseq_analysis.grad_limits import AxisResult, GradientLimits
+from pulseq_analysis.seq_utils import GAMMA
 from pypulseq.event_lib import EventLibrary
 from synthetic import (
     RASTER_4US_JUNCTION,
@@ -21,12 +23,10 @@ from pulseq_checks.checks.gradient import (
     AMPLITUDE_AXIS,
     SLEW_AXIS,
 )
-from pulseq_checks.grad_limits import AxisResult, GradientLimits, HardwareLimits
-from pulseq_checks.profile import TargetProfile
+from pulseq_checks.profile import HardwareLimits, TargetProfile
 from pulseq_checks.results import Location, State
 from pulseq_checks.rules import CheckSpec, RunContext
 from pulseq_checks.run import run_checks
-from pulseq_checks.seq_utils import GAMMA
 
 CHECKS = (AMPLITUDE_AXIS, SLEW_AXIS, AMPLITUDE_ANY_ORIENTATION)
 # The sequences use a system with larger limits than the profiles, so that a sequence can be
@@ -123,6 +123,21 @@ def spy_on_gradient_limits(monkeypatch) -> list[dict]:
 
     monkeypatch.setattr(gradient_module, "gradient_limits", spy)
     return calls
+
+
+def spy_on_hardware_limits(monkeypatch) -> list[HardwareLimits]:
+    """Replace `_hardware_limits` in the check module with a function that calls the real one
+    and keeps the `HardwareLimits` of each call (one call for each rule that runs); returns
+    that list."""
+    seen: list[HardwareLimits] = []
+    real = gradient_module._hardware_limits
+
+    def spy(ctx):
+        seen.append(real(ctx))
+        return seen[-1]
+
+    monkeypatch.setattr(gradient_module, "_hardware_limits", spy)
+    return seen
 
 
 @dataclass(frozen=True)
@@ -332,7 +347,6 @@ def test_a_value_with_no_block_has_a_location_with_the_time_only(monkeypatch, ch
         vector_peak_mt_per_m=5.0,
         vector_peak_time_s=0.25,
         vector_peak_block=None,
-        limits=HardwareLimits(20.0, 200.0, "t"),
     )
     monkeypatch.setattr(gradient_module, "gradient_limits", lambda seq, **kwargs: measured)
 
@@ -369,15 +383,14 @@ def test_a_target_with_one_limit_gives_not_evaluated_for_the_checks_of_the_other
 def test_a_target_with_one_limit_gives_the_other_as_nan_and_its_name_as_the_label(monkeypatch):
     """The limits of a target with only `opts.max_grad` come from its `pp.Opts`, with the gamma
     of that Opts (40 MHz/T, the gamma that the measurement uses too), and the other limit is
-    nan. `gradient_limits` is not called with None."""
+    nan."""
     install(monkeypatch, *CHECKS)
-    calls = spy_on_gradient_limits(monkeypatch)
+    seen = spy_on_hardware_limits(monkeypatch)
     profile = make_profile(max_grad=20.0, name="only grad", gamma=40e6)
 
     run_checks(peak_sequence(), [profile])
 
-    (call,) = calls
-    limits = call["limits"]
+    limits = seen[0]
     assert limits.max_grad_mt_per_m == pytest.approx(20.0)
     assert math.isnan(limits.max_slew_t_per_m_per_s)
     assert limits.label == "only grad"
@@ -385,14 +398,14 @@ def test_a_target_with_one_limit_gives_the_other_as_nan_and_its_name_as_the_labe
 
 def test_a_target_with_only_max_slew_gives_max_grad_as_nan(monkeypatch):
     install(monkeypatch, *CHECKS)
-    calls = spy_on_gradient_limits(monkeypatch)
+    seen = spy_on_hardware_limits(monkeypatch)
 
     run_checks(peak_sequence(), [make_profile(max_slew=300.0, name="only slew")])
 
-    (call,) = calls
-    assert call["limits"].max_slew_t_per_m_per_s == pytest.approx(300.0)
-    assert math.isnan(call["limits"].max_grad_mt_per_m)
-    assert call["limits"].label == "only slew"
+    limits = seen[0]
+    assert limits.max_slew_t_per_m_per_s == pytest.approx(300.0)
+    assert math.isnan(limits.max_grad_mt_per_m)
+    assert limits.label == "only slew"
 
 
 @pytest.mark.parametrize(
@@ -424,10 +437,11 @@ def test_rise_time_without_max_grad_gives_not_evaluated_for_the_slew(monkeypatch
 
 
 def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp_path):
-    """`gradient_limits` runs one time for each target, over the whole file, with the hardware
-    limits of the target and never with None."""
+    """`gradient_limits` runs one time for each target, over the whole file, with the gamma
+    of the target only, and the rules compare with the hardware limits of the target."""
     install(monkeypatch, *CHECKS)
     calls = spy_on_gradient_limits(monkeypatch)
+    seen = spy_on_hardware_limits(monkeypatch)
     path = tmp_path / "peak.seq"
     peak_sequence().write(str(path))
     targets = [make_profile(25.0, 250.0, name="a"), make_profile(30.0, 300.0, name="b")]
@@ -437,20 +451,21 @@ def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp
     assert len(matrix.results) == 6
     assert {r.state for r in matrix.results} == {State.PASS}
     assert len(calls) == 2
-    assert [call["limits"] for call in calls] == [t.hardware_limits for t in targets]
-    assert all(call.keys() == {"limits", "gamma"} for call in calls)
+    assert set(seen) == {t.hardware_limits for t in targets}
+    assert all(call.keys() == {"gamma"} for call in calls)
     assert [call["gamma"] for call in calls] == [GAMMA, GAMMA]
 
 
 def test_the_three_checks_of_one_target_call_gradient_limits_one_time(monkeypatch):
     install(monkeypatch, *CHECKS)
     calls = spy_on_gradient_limits(monkeypatch)
+    seen = spy_on_hardware_limits(monkeypatch)
     profile = make_profile(25.0, 250.0)
 
     run_checks(peak_sequence(), [profile])
 
     assert len(calls) == 1
-    assert calls[0]["limits"] == profile.hardware_limits
+    assert set(seen) == {profile.hardware_limits}
 
 
 def test_limits_from_sequence_uses_the_limits_of_seq_system(monkeypatch):

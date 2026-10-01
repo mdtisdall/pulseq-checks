@@ -2,19 +2,33 @@ from dataclasses import replace
 
 import pypulseq as pp
 import pytest
+from pulseq_analysis.pns import pns_levels_for
+from pulseq_analysis.pns_levels import PNS_LIMIT
+from pulseq_analysis.seq_index import sequence_index
+from pypulseq.event_lib import EventLibrary
 from pypulseq.utils.safe_pns_prediction import safe_example_hw
 from synthetic import SYSTEM, empty_sequence, gre_sequence
 from test_asc_profile import FIELDS, write_profile
-from test_extensions import _with_rotation_library
 
 from pulseq_checks import registry
 from pulseq_checks.checks.pns import SAFE
-from pulseq_checks.pns import pns_levels_for
-from pulseq_checks.pns_levels import SAFE_MODEL, hw_from_dict
 from pulseq_checks.profile import read_profile
 from pulseq_checks.results import State
 from pulseq_checks.run import run_checks
-from pulseq_checks.seq_index import sequence_index
+from pulseq_checks.safe_model import SAFE_MODEL, hw_from_dict
+
+# A scalar-first unit quaternion (angle 45 deg about z): q0=cos(22.5deg), qz=sin(22.5deg).
+_QUATERNION = (0.9238795325112867, 0.0, 0.0, 0.3826834323650898)
+
+
+def _with_rotation_library() -> pp.Sequence:
+    """A `gre_sequence` with one rotation stored the way pypulseq draft PR #372 stores
+    it: a `rotation_library` (an `EventLibrary` of scalar-first unit quaternions)."""
+    seq = gre_sequence(num_trs=2)
+    seq.rotation_library = EventLibrary()
+    seq.rotation_library.insert(1, _QUATERNION)
+    return seq
+
 
 PASS_SCALE = 1000.0
 FAIL_SCALE = 0.01
@@ -221,9 +235,9 @@ def test_a_fail_gives_one_finding_for_each_interval_in_time_order(target):
     levels = levels_of(seq, profile)
     index = sequence_index(seq)
     assert result.state is State.FAIL
-    assert len(levels.above_limit) >= 1
-    assert len(result.findings) == len(levels.above_limit)
-    for finding, interval in zip(result.findings, levels.above_limit, strict=True):
+    assert len(levels.above[PNS_LIMIT]) >= 1
+    assert len(result.findings) == len(levels.above[PNS_LIMIT])
+    for finding, interval in zip(result.findings, levels.above[PNS_LIMIT], strict=True):
         assert finding.code == "PNS_ABOVE_LIMIT"
         assert finding.location.time_s == interval.start_s
         assert finding.location.block == block_at(index, interval.start_s)
@@ -271,18 +285,20 @@ def test_two_separate_intervals_give_two_findings_in_time_order(target):
     that only the larger hump of the total of a trapezoid is at or above 100 %."""
     one, two = two_trapezoids()
     profile = target(levels_of(one, target(1.0)).peak / 1.02)
-    assert len(levels_of(one, profile).above_limit) == 1
+    assert len(levels_of(one, profile).above[PNS_LIMIT]) == 1
     result = run_one(two, profile)
     index = sequence_index(two)
     levels = levels_of(two, profile)
-    assert len(levels.above_limit) == 2
+    assert len(levels.above[PNS_LIMIT]) == 2
     first, second = result.findings
     assert (first.code, second.code) == ("PNS_ABOVE_LIMIT", "PNS_ABOVE_LIMIT")
-    assert [f.location.time_s for f in (first, second)] == [i.start_s for i in levels.above_limit]
+    assert [f.location.time_s for f in (first, second)] == [
+        i.start_s for i in levels.above[PNS_LIMIT]
+    ]
     assert first.location.time_s < second.location.time_s
     assert first.data["end_s"] < second.data["start_s"]
     assert [f.location.block for f in (first, second)] == [
-        block_at(index, i.start_s) for i in levels.above_limit
+        block_at(index, i.start_s) for i in levels.above[PNS_LIMIT]
     ]
     assert first.location.block != second.location.block
 

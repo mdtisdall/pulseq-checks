@@ -8,12 +8,12 @@ import math
 from typing import Any
 
 import numpy as np
+from pulseq_analysis.seq_index import block_cache_off, sequence_index
 from pypulseq.check_timing import error_messages
 
 from ..profile import RASTER_OPTS
 from ..results import Finding, Location, Result, State
 from ..rules import CheckSpec, RunContext
-from ..seq_index import block_cache_off, sequence_index
 
 # The relative tolerance of a comparison of two rasters. pypulseq writes a definition with
 # nine significant digits (`0.9g`), so the value in the file differs from the raster that the

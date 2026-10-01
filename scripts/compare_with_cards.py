@@ -419,8 +419,8 @@ def cards(args: argparse.Namespace) -> None:
 
 def _checks_pair(seq_path: str, limit_set: dict) -> dict:
     import pypulseq as pp
+    from pulseq_analysis.grad_limits import gradient_limits
 
-    from pulseq_checks.grad_limits import gradient_limits
     from pulseq_checks.profile import read_profile
     from pulseq_checks.run import run_checks
 
@@ -449,7 +449,7 @@ def _checks_pair(seq_path: str, limit_set: dict) -> dict:
         return _error_rows([dict(vars(e)) for e in errors])
 
     def axes():
-        measured = gradient_limits(read(), limits=profile.hardware_limits)
+        measured = gradient_limits(read())
         return {
             "reason": measured.reason,
             "peak_mt_per_m": {a: measured.axes[a].peak_mt_per_m for a in AXES},

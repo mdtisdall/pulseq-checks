@@ -3,6 +3,28 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
+## Unreleased
+
+### Changed
+
+- **The measurement modules moved to the package pulseq-analysis**
+  (`0.1.0rc2`), a dependency of pulseq-checks. `pulseq_checks` does not
+  re-export them, so the old import paths stop working. The new paths are:
+  `pulseq_checks.asc`, `extensions`, `grad_limits`, `pns`, `pns_levels`,
+  `sampling`, `seq_index` and `seq_utils` become the modules of the same name
+  in `pulseq_analysis`. The results of the checks do not change.
+- **`HardwareLimits`** is in `pulseq_checks.profile`. It stays a public name:
+  `pulseq_checks.HardwareLimits` works as before.
+- **The entry point of the SAFE model** is `pulseq_checks.safe_model:SAFE_MODEL`.
+  `SAFE_MODEL` and `hw_from_dict` moved from `pns_levels` to the new module
+  `pulseq_checks.safe_model`. The name of the model, `pns.safe`, does not
+  change.
+- **`PnsLevels.above_limit`** is now `PnsLevels.above[PNS_LIMIT]`
+  (`above` is a dict from each threshold to its intervals), and
+  `gradient_limits` has no `limits` argument and `GradientLimits` has no
+  `limits` field. These are changes of pulseq-analysis, and the checks of this
+  package use them.
+
 ## 0.1.0rc2 (2026-09-30)
 
 The second release candidate. Each of the six checks gives findings (the

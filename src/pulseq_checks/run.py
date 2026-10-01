@@ -11,8 +11,7 @@ from pathlib import Path
 import pypulseq as pp
 
 from . import registry
-from .grad_limits import HardwareLimits
-from .profile import RASTER_OPTS, TargetProfile
+from .profile import RASTER_OPTS, HardwareLimits, TargetProfile
 from .results import CheckRunError, Finding, Result, ResultMatrix, State, TargetInfo
 from .rules import CheckRule, RunContext
 
