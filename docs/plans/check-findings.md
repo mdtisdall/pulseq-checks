@@ -58,12 +58,13 @@ Not in this plan: findings for the other checks (section 8), and a release.
    the standard error. With `--json FILE`, the JSON goes to the file and the
    summary to the standard output.
 5. **The JSON reader is strict.** `results.FORMAT` is 1. `from_json` refuses
-   a larger format, and an unknown or a missing key in each object. Thus a
-   new key needs format 2 (design section 5.11 uses the same rule for
-   profiles).
+   a larger format, and an unknown or a missing key in each object. After
+   the first final release (0.1.0), a new key needs format 2 (design section
+   5.11 uses the same rule for profiles). In the release candidates the
+   format stays 1 (D7).
 6. **pulseq-reports does not read the JSON yet.** Its step 3 will pin a tag
-   of this package. A reader of version `0.1.0rc1` refuses format 2, as
-   intended.
+   of this package. A reader of version `0.1.0rc1` refuses the new key
+   `findings`, as intended.
 
 ## 3. Where the findings go: the result, not the standard error
 
@@ -163,11 +164,13 @@ result of a different check or target. It also makes "error" when
 (not a `bool`) of 0 or more. The reason names the problem. `run_checks` gets
 no new argument.
 
-### 4.5 The JSON result: format 2
+### 4.5 The JSON result: the findings keys in format 1
 
-- `FORMAT` becomes 2. Each result object gets the keys `"findings"` (a list,
-  always present) and `"findings_omitted"` (an integer), after
-  `"spec_url"`.
+- `FORMAT` stays 1 (D7). Each result object gets the keys `"findings"` (a
+  list, always present) and `"findings_omitted"` (an integer), after
+  `"spec_url"`. Phase 1 (PR #20) made this format 2 and read format 1 too;
+  `chore/rc-result-format` put it back to 1 and removed the read of the old
+  form.
 - A finding is the object
   `{"code": ..., "message": ..., "location": null | {"block": ..., "time_s": ...}, "data": {...}}`,
   with the keys in this order.
@@ -176,10 +179,8 @@ no new argument.
   reads these three strings in `data` back as floats. This is why `Finding`
   refuses these three strings as values (section 4.1): the round trip
   `from_json(m.to_json()) == m` stays exact (except `nan`, as now).
-- `from_json` reads format 1 and format 2. In format 1, a result object has
-  no findings keys, and `from_json` gives `findings=()` and
-  `findings_omitted=0`. In format 2, both keys are necessary. A format above
-  2 is refused, as now.
+- Both keys are necessary. `from_json` does not read the form without them
+  (the result of `0.1.0rc1`). A format above 1 is refused, as now.
 - The indent stays 2. A compact form of the findings saves about 30 %
   (section 2, fact 3). It is not worth a custom writer now.
 
@@ -273,7 +274,7 @@ decisions again. The alternatives stay here as a record.
 | D4 | The findings in the summary | One count line for each result with findings; `--show-findings` lists them. | No count lines; or list them by default. |
 | D5 | The message of a timing finding | The text of pypulseq (`error_messages` and `format_string`), with a fallback. | Only `"<event>.<field>: <error_type>"`; the numbers are in `data`. |
 | D6 | The specification version of `timing.pypulseq` | Stays 1. | 2. |
-| D7 | The JSON format | 2, and `from_json` reads 1 and 2. | — |
+| D7 | The JSON format | 1: in the release candidates the format does not change (decided 2026-09-30, after phase 1, which had made it 2). `from_json` reads only the current form. | 2, and `from_json` reads 1 and 2 (phase 1 as merged in PR #20). |
 | D8 | The scope | Only `timing.pypulseq` gives findings in this plan. Section 8 lists the next checks in `TODO.md`. | Also `timing.rasters` (each raster that differs) in phase 2. |
 | D9 | The PRs | Two: the general mechanism (phase 1), then the timing check (phase 2). | One PR. |
 

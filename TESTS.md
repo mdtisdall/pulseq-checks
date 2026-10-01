@@ -2711,8 +2711,8 @@ names the profile file and the `.asc` file.
 ### 2.9 Results (`test_results.py`)
 
 These tests cover `Finding` (plan check-findings, section 4.1), `ResultMatrix`: its exit status
-(design section 5.6, R3), its JSON form (decision 9 of the plan, and format 2 with the findings,
-plan check-findings, section 4.5) and `ResultMatrix.with_max_findings` (section 4.6). They build
+(design section 5.6, R3), its JSON form (decision 9 of the plan, with the findings of plan
+check-findings, section 4.5) and `ResultMatrix.with_max_findings` (section 4.6). They build
 the results directly, with no sequence.
 
 #### `test_exit_status`
@@ -2763,7 +2763,7 @@ back.
 
 #### `test_json_has_the_keys_of_decision_9`
 
-**Checks:** The JSON object has `"format": 2` and the keys of decision 9, in a fixed order:
+**Checks:** The JSON object has `"format": 1` and the keys of decision 9, in a fixed order:
 `format`, `package_version`, `sequence`, `targets`, `results`. A target has `name`, `sources`
 (an object), `unused_sections` (a list) and `limits_source`. A result has each `Result` field,
 with `state` as its value text (for example "not evaluated") and `location` as
@@ -2823,30 +2823,9 @@ tests the value with `math.isnan`.
 
 **Assumptions:** The test does not compare the matrices, because `nan != nan`.
 
-#### `test_from_json_reads_format_1_with_no_findings`
-
-**Checks:** A text of format 1, in which a result object has no `findings` and no
-`findings_omitted`, is read. The result has `findings == ()` and `findings_omitted == 0`, and
-its other fields are as in the text.
-
-**How:** The test makes the JSON object of a matrix, sets `format` to 1, deletes the two keys
-from each result, reads the text and checks the two fields and two other fields of the result.
-
-**Assumptions:** The test changes a text of format 2 to a text of format 1. It does not use a
-text that an old version wrote.
-
-#### `test_from_json_rejects_a_findings_key_in_format_1`
-
-**Checks:** A result object of format 1 with the key `findings` is refused as an unknown key.
-
-**How:** The test sets `format` to 1 in the JSON object of a matrix that has the findings keys,
-and matches `unknown key 'findings'`.
-
-**Assumptions:** None.
-
 #### `test_from_json_rejects_a_newer_format`
 
-**Checks:** `from_json` raises `ValueError` for a format above `FORMAT` (format 3 now), and the
+**Checks:** `from_json` raises `ValueError` for a format above `FORMAT` (format 2 now), and the
 message names both versions (the format of the text and the format that the package reads).
 
 **How:** The test changes `format` to `FORMAT + 1` in the JSON object of a matrix and matches
@@ -2887,7 +2866,7 @@ the name in the message.
 #### `test_from_json_rejects_a_missing_key`
 
 **Checks:** A missing key is a `ValueError` that names the key, in the matrix, in a target, in
-a result, in a location, and in a result of format 2 (`findings`, `findings_omitted`), in a
+a result, in a location, in the findings keys of a result (`findings`, `findings_omitted`), in a
 finding (`message`, `data`) and in the location of a finding (`block`).
 
 **How:** The test is parametrized over the nine places. It deletes one key there (`sequence`,
