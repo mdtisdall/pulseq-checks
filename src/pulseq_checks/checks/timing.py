@@ -25,25 +25,51 @@ _RASTER_DEFINITIONS = tuple(RASTER_OPTS)
 _RASTER_INPUTS = tuple(f"rasters.{name}" for name in _RASTER_DEFINITIONS)
 
 
+class _RasterProblem(ValueError):
+    """A raster that the file does not declare (`code` RASTER_NOT_DECLARED), or declares as a
+    value that is not one positive finite number (`code` RASTER_INVALID). `data` has the
+    values of the problem for its finding: the declared value of RASTER_INVALID, as a float
+    when it is one number, else as the `repr` text of the value."""
+
+    def __init__(self, message: str, code: str, data: dict[str, str | float] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.data = data or {}
+
+
 def _declared_raster(definitions: dict[str, Any], name: str) -> float:
-    """The raster `name` of `definitions`, in seconds. Raises `ValueError` when the file
-    does not declare it, or declares a value that is not one positive finite number."""
+    """The raster `name` of `definitions`, in seconds. Raises `_RasterProblem` (a
+    `ValueError`) when the file does not declare it, or declares a value that is not one
+    positive finite number."""
     if name not in definitions:
-        raise ValueError(f"the file does not declare {name}")
+        raise _RasterProblem(f"the file does not declare {name}", "RASTER_NOT_DECLARED")
     value = definitions[name]
     if isinstance(value, np.ndarray) and value.size == 1:
         value = value.item()
     if not isinstance(value, int | float) or isinstance(value, bool):
-        # `run` catches this `ValueError`, like the others (hence the noqa).
-        raise ValueError(f"the file declares {name} as {value!r}, not as one number")  # noqa: TRY004
+        raise _RasterProblem(
+            f"the file declares {name} as {value!r}, not as one number",
+            "RASTER_INVALID",
+            {"declared": repr(value)},
+        )
     if not (math.isfinite(value) and value > 0):
-        raise ValueError(f"the file declares {name} as {value!r}, not as a positive number")
+        raise _RasterProblem(
+            f"the file declares {name} as {value!r}, not as a positive number",
+            "RASTER_INVALID",
+            {"declared": float(value)},
+        )
     return float(value)
 
 
 def _deviation(declared: float, target: float) -> float:
     """`|F/T - 1|` for the raster `declared` (F) of the file and the raster `target` (T)."""
     return abs(declared / target - 1)
+
+
+def _mismatch_message(name: str, declared: float, target: float) -> str:
+    """The text of a raster `declared` in the file against the raster `target`: the detail
+    of a pass or a fail, and the message of a RASTER_MISMATCH finding."""
+    return f"{name}: {declared!r} s in the file, {target!r} s on the target"
 
 
 class _Rasters:
@@ -92,35 +118,90 @@ class _Rasters:
             "definition, so the check has no value to compare. A file of a format older "
             "than 1.4.0 declares no raster, and pypulseq fills the four definitions with the "
             "rasters of the target when it reads the file. For such a file the check "
-            "compares the rasters of the target with themselves and passes."
+            "compares the rasters of the target with themselves and passes.\n\n"
+            "The result also gives each raster with a problem as a finding (see Findings)."
         ),
         cost="fast",
         pypulseq=None,
         url=None,
+        findings=(
+            "One finding for each of the four rasters that has a problem, in the order "
+            "GradientRasterTime, RadiofrequencyRasterTime, AdcRasterTime, "
+            "BlockDurationRaster. A raster without a problem gives no finding. The code is "
+            "RASTER_NOT_DECLARED when the file does not declare the raster; RASTER_INVALID "
+            "when the file declares a value that is not one positive finite number; "
+            "RASTER_MISMATCH when the file declares a valid raster whose deviation is above "
+            'the tolerance. A "fail" result has one RASTER_MISMATCH finding for each raster '
+            'that differs from the target. An "error" result lists every problem: the '
+            "RASTER_NOT_DECLARED and RASTER_INVALID findings, and also a RASTER_MISMATCH "
+            "finding for each raster that the file declares validly and that differs from the "
+            "target. The location is none, because a raster is a definition of the whole "
+            "file, not of a block. The data of each code have the key name (the name of the "
+            "raster, a text: for example GradientRasterTime) and the key target_s (the raster "
+            "of the target, in seconds). RASTER_INVALID has declared: a number in seconds when "
+            "the value in the file is one number (also one that is not finite, zero or "
+            "negative), else the Python repr text of the value in the file (for example of a "
+            "list or a string). RASTER_MISMATCH has file_s (the raster of the file, in "
+            "seconds) and deviation (|F/T - 1|, a ratio with no unit). The message of "
+            "RASTER_NOT_DECLARED and RASTER_INVALID is the text of the problem, for example "
+            '"the file does not declare GradientRasterTime"; the message of RASTER_MISMATCH '
+            'is the name, a colon, the raster of the file in seconds, "s in the file", a '
+            'comma, the raster of the target in seconds and "s on the target".'
+        ),
     )
 
     def run(self, ctx: RunContext) -> Result:
         definitions = ctx.sequence.definitions
         targets = ctx.profile.rasters
         problems: list[str] = []
+        findings: list[Finding] = []
         worst: tuple[float, float, float, str] | None = None  # (deviation, F, T, name)
         for name in _RASTER_DEFINITIONS:
+            target = targets[name]
             try:
                 declared = _declared_raster(definitions, name)
-            except ValueError as e:
+            except _RasterProblem as e:
                 problems.append(str(e))
+                findings.append(
+                    Finding(
+                        code=e.code,
+                        message=str(e),
+                        data={"name": name, **e.data, "target_s": target},
+                    )
+                )
                 continue
-            target = targets[name]
             deviation = _deviation(declared, target)
             if worst is None or deviation > worst[0]:
                 worst = (deviation, declared, target, name)
+            if deviation > RASTER_REL_TOL:
+                findings.append(
+                    Finding(
+                        code="RASTER_MISMATCH",
+                        message=_mismatch_message(name, declared, target),
+                        data={
+                            "name": name,
+                            "file_s": declared,
+                            "target_s": target,
+                            "deviation": deviation,
+                        },
+                    )
+                )
         if problems:
-            return ctx.result(self.spec, State.ERROR, reason="; ".join(problems))
+            return ctx.result(
+                self.spec, State.ERROR, reason="; ".join(problems), findings=tuple(findings)
+            )
         assert worst is not None  # no problem, so each raster was compared
         state = State.PASS if worst[0] <= RASTER_REL_TOL else State.FAIL
         _, declared, target, name = worst
-        detail = f"{name}: {declared!r} s in the file, {target!r} s on the target"
-        return ctx.result(self.spec, state, value=declared, limit=target, unit="s", reason=detail)
+        return ctx.result(
+            self.spec,
+            state,
+            value=declared,
+            limit=target,
+            unit="s",
+            reason=_mismatch_message(name, declared, target),
+            findings=tuple(findings),
+        )
 
 
 # The compiled message template of each error type. `format_string` of pypulseq compiles

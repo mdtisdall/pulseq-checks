@@ -10,7 +10,7 @@ from synthetic import SYSTEM, block_pulse
 from pulseq_checks import registry
 from pulseq_checks.checks.timing import PYPULSEQ, RASTERS
 from pulseq_checks.profile import RASTER_OPTS, TargetProfile
-from pulseq_checks.results import Finding, Location, State
+from pulseq_checks.results import Finding, Location, ResultMatrix, State
 from pulseq_checks.rules import RunContext
 from pulseq_checks.run import run_checks
 
@@ -160,6 +160,8 @@ def test_equal_rasters_pass(tmp_path, monkeypatch):
     assert result.reason.startswith("GradientRasterTime: ")
     assert result.value == pytest.approx(1e-5, rel=1e-8)
     assert result.limit == 1e-5
+    assert result.findings == ()
+    assert result.findings_omitted == 0
 
 
 @pytest.mark.parametrize("name", RASTER_VALUES)
@@ -206,6 +208,8 @@ def test_the_tolerance_of_a_raster_is_relative_1e_8(factor, state):
     seq.definitions.update({k: v * factor for k, v in RASTER_VALUES.items()})
     result = direct_result(RASTERS, seq, make_target())
     assert result.state is state
+    # A raster within the tolerance gives no finding; each raster outside it gives one.
+    assert len(result.findings) == (4 if state is State.FAIL else 0)
 
 
 @pytest.mark.filterwarnings("ignore:No BlockDurationRaster found")  # from pypulseq's read
@@ -227,6 +231,173 @@ def test_a_declared_raster_that_is_not_one_positive_number_gives_error(declared)
     result = direct_result(RASTERS, seq, make_target())
     assert result.state is State.ERROR
     assert "GradientRasterTime" in result.reason
+
+
+def mismatch_data(name, factor):
+    """The data of the RASTER_MISMATCH finding for the raster `name` that is `factor` times
+    its target value."""
+    return {
+        "name": name,
+        "file_s": factor * RASTER_VALUES[name],
+        "target_s": RASTER_VALUES[name],
+        "deviation": abs(factor - 1),
+    }
+
+
+@pytest.mark.parametrize("name", RASTER_VALUES)
+def test_a_raster_that_differs_gives_one_mismatch_finding(tmp_path, monkeypatch, name):
+    result = raster_result(tmp_path, monkeypatch, make_target(), definitions=scaled(name, 1.5))
+    assert result.state is State.FAIL
+    (finding,) = result.findings
+    assert finding.code == "RASTER_MISMATCH"
+    assert finding.location is None
+    assert dict(finding.data) == pytest.approx(mismatch_data(name, 1.5), rel=1e-6)
+    assert all(type(v) in DATA_TYPES for v in finding.data.values())
+    # The message is the reason of the result, and the result keeps its value and limit.
+    expected = f"{name}: {result.value!r} s in the file, {RASTER_VALUES[name]!r} s on the target"
+    assert finding.message == expected
+    assert result.reason == expected
+    assert result.value == pytest.approx(1.5 * RASTER_VALUES[name], rel=1e-8)
+    assert result.limit == RASTER_VALUES[name]
+
+
+@pytest.mark.parametrize(
+    ("factors", "worst"),
+    [
+        # The second raster of the order (RF) differs by 0.1, the third (ADC) by 0.5.
+        ({"RadiofrequencyRasterTime": 1.1, "AdcRasterTime": 1.5}, "AdcRasterTime"),
+        # The first raster of the order has the larger deviation.
+        ({"GradientRasterTime": 2, "BlockDurationRaster": 1.1}, "GradientRasterTime"),
+    ],
+)
+def test_two_rasters_that_differ_give_two_findings_in_the_order_of_the_rasters(
+    tmp_path, monkeypatch, factors, worst
+):
+    definitions = {k: v for name, f in factors.items() for k, v in scaled(name, f).items()}
+    result = raster_result(tmp_path, monkeypatch, make_target(), definitions=definitions)
+    assert result.state is State.FAIL
+    assert [f.code for f in result.findings] == ["RASTER_MISMATCH"] * 2
+    assert [f.data["name"] for f in result.findings] == [n for n in RASTER_VALUES if n in factors]
+    for finding in result.findings:
+        name = finding.data["name"]
+        assert dict(finding.data) == pytest.approx(mismatch_data(name, factors[name]), rel=1e-6)
+    assert result.reason.startswith(f"{worst}: ")
+    assert result.limit == RASTER_VALUES[worst]
+
+
+@pytest.mark.filterwarnings("ignore:No BlockDurationRaster found")  # from pypulseq's read
+@pytest.mark.parametrize("name", RASTER_VALUES)
+def test_a_raster_that_the_file_does_not_declare_gives_one_finding(tmp_path, monkeypatch, name):
+    result = raster_result(tmp_path, monkeypatch, make_target(), remove=[name])
+    assert result.state is State.ERROR
+    (finding,) = result.findings
+    assert finding.code == "RASTER_NOT_DECLARED"
+    assert finding.location is None
+    assert finding.message == f"the file does not declare {name}"
+    assert dict(finding.data) == {"name": name, "target_s": RASTER_VALUES[name]}
+    assert result.reason == finding.message
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ("abc", "'abc'"),
+        (np.array([1e-5, 2e-5]), repr(np.array([1e-5, 2e-5]))),
+        ([1e-5], "[1e-05]"),
+        (True, "True"),
+        (0.0, 0.0),
+        (-1e-5, -1e-5),
+        (np.array([-1e-5]), -1e-5),
+        (math.nan, math.nan),
+        (math.inf, math.inf),
+        (-math.inf, -math.inf),
+    ],
+)
+def test_a_declared_raster_that_is_not_valid_gives_one_invalid_finding(declared, expected):
+    seq = pp.Sequence(SYSTEM)
+    seq.definitions.update({k: v for k, v in RASTER_VALUES.items()})
+    seq.definitions["GradientRasterTime"] = declared
+    result = direct_result(RASTERS, seq, make_target())
+    assert result.state is State.ERROR
+    (finding,) = result.findings
+    assert finding.code == "RASTER_INVALID"
+    assert finding.location is None
+    assert finding.message == result.reason
+    assert "GradientRasterTime" in finding.message
+    data = dict(finding.data)
+    assert list(data) == ["name", "declared", "target_s"]
+    assert (data["name"], data["target_s"]) == ("GradientRasterTime", 1e-5)
+    # A single number is a Python float, also when it is not finite, zero or negative; any
+    # other value is the repr text.
+    if isinstance(expected, str):
+        assert data["declared"] == expected
+        assert type(data["declared"]) is str
+    else:
+        assert type(data["declared"]) is float
+        assert data["declared"] == expected or (
+            math.isnan(expected) and math.isnan(data["declared"])
+        )
+
+
+def test_an_error_lists_the_mismatches_of_the_other_rasters_too(tmp_path, monkeypatch):
+    definitions = {**scaled("GradientRasterTime", 1.5), **scaled("BlockDurationRaster", 2)}
+    result = raster_result(
+        tmp_path, monkeypatch, make_target(), definitions=definitions, remove=["AdcRasterTime"]
+    )
+    assert result.state is State.ERROR
+    assert [(f.code, f.data["name"]) for f in result.findings] == [
+        ("RASTER_MISMATCH", "GradientRasterTime"),
+        ("RASTER_NOT_DECLARED", "AdcRasterTime"),
+        ("RASTER_MISMATCH", "BlockDurationRaster"),
+    ]
+    assert all(f.location is None for f in result.findings)
+    assert dict(result.findings[0].data) == pytest.approx(
+        mismatch_data("GradientRasterTime", 1.5), rel=1e-6
+    )
+    assert dict(result.findings[1].data) == {"name": "AdcRasterTime", "target_s": 1e-7}
+    assert dict(result.findings[2].data) == pytest.approx(
+        mismatch_data("BlockDurationRaster", 2), rel=1e-6
+    )
+    # The reason, the value and the limit are those of an error that has one problem.
+    assert result.reason == "the file does not declare AdcRasterTime"
+    assert result.value is None
+    assert result.limit is None
+
+
+def test_the_findings_of_an_error_survive_the_json_round_trip(monkeypatch):
+    install(monkeypatch)
+    seq = pp.Sequence(SYSTEM)
+    seq.definitions.update(
+        {
+            "GradientRasterTime": "abc",
+            "RadiofrequencyRasterTime": math.nan,
+            "AdcRasterTime": 1e-7,
+            "BlockDurationRaster": 2e-5,
+        }
+    )
+    matrix = run_checks(seq, [make_target()], select=[RASTER_IDS])
+    (result,) = matrix.results
+    assert result.state is State.ERROR
+    assert [f.code for f in result.findings] == ["RASTER_INVALID"] * 2 + ["RASTER_MISMATCH"]
+    (restored,) = ResultMatrix.from_json(matrix.to_json()).results
+    assert len(restored.findings) == 3
+    assert restored.findings[0] == result.findings[0]
+    assert restored.findings[0].data["declared"] == "'abc'"
+    # nan is not equal to itself, so compare the other fields and the nan separately.
+    nan_finding = restored.findings[1]
+    assert math.isnan(nan_finding.data["declared"])
+    assert (nan_finding.code, nan_finding.message, nan_finding.location) == (
+        "RASTER_INVALID",
+        result.findings[1].message,
+        None,
+    )
+    assert {k: v for k, v in nan_finding.data.items() if k != "declared"} == {
+        "name": "RadiofrequencyRasterTime",
+        "target_s": 1e-6,
+    }
+    assert restored.findings[2] == result.findings[2]
+    assert restored.reason == result.reason
+    assert restored.state is State.ERROR
 
 
 @pytest.mark.parametrize("name", RASTER_VALUES)
@@ -504,7 +675,13 @@ def test_the_spec_of_timing_pypulseq_has_findings_and_keeps_version_1():
     assert PYPULSEQ.spec.findings.strip()
     # The text names each error type that pypulseq has a message template for.
     assert all(code in PYPULSEQ.spec.findings for code in error_messages)
-    assert RASTERS.spec.findings is None
+
+
+def test_the_spec_of_timing_rasters_has_findings_and_keeps_version_1():
+    assert RASTERS.spec.version == 1
+    assert RASTERS.spec.findings.strip()
+    for code in ("RASTER_NOT_DECLARED", "RASTER_INVALID", "RASTER_MISMATCH"):
+        assert code in RASTERS.spec.findings
 
 
 def test_the_ids_and_inputs_of_the_specs():
