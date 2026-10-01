@@ -112,14 +112,15 @@ class GradientLimits:
     whole_rms_mt_per_m: dict[str, float] | None = None
 
 
-def _default_limits(seq: pp.Sequence) -> HardwareLimits:
+def _default_limits(seq: pp.Sequence, gamma: float) -> HardwareLimits:
     # seq.system.max_grad and seq.system.max_slew are always stored in Hz/m and
     # Hz/m/s, whatever unit the caller gave pp.Opts, because pp.Opts.__init__
     # converts every unit to Hz/m (respectively Hz/m/s) with the sequence's own gamma
-    # before it stores the value (verified in pypulseq's opts.py).
+    # before it stores the value (verified in pypulseq's opts.py). The conversion back to mT/m
+    # (T/m/s) uses `gamma`, the same gamma as the measured values.
     return HardwareLimits(
-        max_grad_mt_per_m=seq.system.max_grad / GAMMA * 1e3,
-        max_slew_t_per_m_per_s=seq.system.max_slew / GAMMA,
+        max_grad_mt_per_m=seq.system.max_grad / gamma * 1e3,
+        max_slew_t_per_m_per_s=seq.system.max_slew / gamma,
         label="pypulseq system limits",
     )
 
@@ -243,7 +244,7 @@ def _triple_vector_peak(
 
 
 def _whole_file_rms(
-    index: SequenceIndex, ev: _EventData, total_duration: float
+    index: SequenceIndex, ev: _EventData, total_duration: float, gamma: float
 ) -> dict[str, float]:
     """The RMS amplitude (mT/m) of each axis over the whole sequence, from the per-event
     integrals and how many times each event plays on each axis (`numpy.bincount`)."""
@@ -256,7 +257,7 @@ def _whole_file_rms(
             continue
         counts = np.bincount(col, minlength=k + 1)[1:]
         rms_sum = float(np.sum(counts * ev.integral))
-        result[axis] = math.sqrt(rms_sum / total_duration) / GAMMA * 1e3
+        result[axis] = math.sqrt(rms_sum / total_duration) / gamma * 1e3
     return result
 
 
@@ -324,6 +325,7 @@ def _range_result(
     lo: float,
     hi: float,
     grad_raster: float,
+    gamma: float,
 ) -> tuple[dict[str, AxisResult], float, float, int | None, bool]:
     """`axes`, `vector_peak_mt_per_m`, `vector_peak_time_s`, `vector_peak_block` and whether any
     axis has an event, for the range `[lo, hi]`.
@@ -511,17 +513,17 @@ def _range_result(
         has_event_any = has_event_any or has_event
         range_length = hi - lo
         rms = (
-            math.sqrt(st["rms_sum"] / range_length) / GAMMA * 1e3
+            math.sqrt(st["rms_sum"] / range_length) / gamma * 1e3
             if has_event and range_length > 0
             else 0.0
         )
         axes[axis] = AxisResult(
-            peak_mt_per_m=st["peak"] / GAMMA * 1e3,
+            peak_mt_per_m=st["peak"] / gamma * 1e3,
             peak_time_s=st["peak_time"],
             peak_block=int(index.block_id[st["peak_play"]])
             if st["peak_play"] is not None
             else None,
-            max_slew_t_per_m_per_s=final_slew / GAMMA,
+            max_slew_t_per_m_per_s=final_slew / gamma,
             slew_time_s=final_slew_time,
             slew_block=(
                 int(index.block_id[final_slew_play]) if final_slew_play is not None else None
@@ -532,7 +534,7 @@ def _range_result(
     vector_peak_block = (
         int(index.block_id[vector_peak_play]) if vector_peak_play is not None else None
     )
-    return axes, vector_peak_hz / GAMMA * 1e3, vector_peak_time, vector_peak_block, has_event_any
+    return axes, vector_peak_hz / gamma * 1e3, vector_peak_time, vector_peak_block, has_event_any
 
 
 def gradient_limits(
@@ -540,6 +542,7 @@ def gradient_limits(
     *,
     window: tuple[float, float] | None = None,
     limits: HardwareLimits | None = None,
+    gamma: float = GAMMA,
 ) -> GradientLimits:
     """The peak amplitude, the peak slew rate and the RMS amplitude of `seq`'s
     gradients, on each logical axis and as a three-axis vector, compared with
@@ -557,6 +560,10 @@ def gradient_limits(
     With `limits=None`, the limits are `seq.system.max_grad` and `seq.system.max_slew`
     (see `HardwareLimits`).
 
+    `gamma` (Hz/T) converts every value from Hz/m (Hz/m/s) to mT/m (T/m/s), and the default
+    limits too. The default is 42.576 MHz/T. A caller that compares the values with limits
+    of its own passes the gamma that converted those limits.
+
     This builds `seq_index.sequence_index(seq)` and the per-event values of
     `seq_index.grad_events` one time (`_event_values`), then combines them with numpy over the
     blocks of the range. It reads individual blocks with `get_block` only for the few blocks
@@ -568,7 +575,7 @@ def gradient_limits(
     """
     refuse_rotations(seq)
     if limits is None:
-        limits = _default_limits(seq)
+        limits = _default_limits(seq, gamma)
 
     index = sequence_index(seq)
     ev = _event_values(seq, index)
@@ -589,11 +596,11 @@ def gradient_limits(
         # Clip to the sequence exactly: start_s/end_s can be off by a rounding error of
         # up to TIME_TOLERANCE and still pass the check above.
         range_s = (max(0.0, start_s), min(total_duration, end_s))
-        whole_rms_mt_per_m = _whole_file_rms(index, ev, total_duration)
+        whole_rms_mt_per_m = _whole_file_rms(index, ev, total_duration, gamma)
 
     lo, hi = range_s
     axes, vector_peak_mt_per_m, vector_peak_time_s, vector_peak_block, has_event = _range_result(
-        seq, index, ev, lo, hi, grad_raster
+        seq, index, ev, lo, hi, grad_raster, gamma
     )
 
     if has_event:

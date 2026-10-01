@@ -53,6 +53,14 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 
 ### Fixed
 
+- **Gradient checks**: `gradient.amplitude.axis`, `gradient.slew.axis` and
+  `gradient.amplitude.any-orientation` convert the measured values with the
+  gamma of the target, the same gamma as the limits, not with a fixed
+  42.576 MHz/T. Before, a profile with another gamma compared the values and
+  the limits in different units (a 21 mT/m gradient passed a 20 mT/m limit
+  with `gamma = 40e6`). `gradient_limits` has a new keyword argument `gamma`
+  (default 42.576 MHz/T). `limits_from_sequence` converts the limits of
+  `seq.system` with its own gamma.
 - **`gradient.slew.axis`**: a profile that gives `opts.max_grad` and
   `opts.rise_time` and no `opts.max_slew` gives the slew limit `max_grad /
   rise_time`, the value that `pp.Opts` calculates. Before, the check was "not

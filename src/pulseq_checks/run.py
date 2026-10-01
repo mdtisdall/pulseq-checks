@@ -15,7 +15,6 @@ from .grad_limits import HardwareLimits
 from .profile import TargetProfile
 from .results import CheckRunError, Finding, Result, ResultMatrix, State, TargetInfo
 from .rules import CheckRule, RunContext
-from .seq_utils import GAMMA
 
 # `ResultMatrix.sequence` for a `Sequence` object, and `TargetInfo.limits_source` and the
 # label of the limits for the opt-in of decision 4.
@@ -160,8 +159,8 @@ def _hardware_limits(
     ):
         # pp.Opts stores max_grad in Hz/m and max_slew in Hz/m/s, whatever unit it was given.
         limits = HardwareLimits(
-            max_grad_mt_per_m=seq.system.max_grad / GAMMA * 1e3,
-            max_slew_t_per_m_per_s=seq.system.max_slew / GAMMA,
+            max_grad_mt_per_m=seq.system.max_grad / seq.system.gamma * 1e3,
+            max_slew_t_per_m_per_s=seq.system.max_slew / seq.system.gamma,
             label=LIMITS_FROM_SEQUENCE,
         )
         return LIMITS_FROM_SEQUENCE, limits

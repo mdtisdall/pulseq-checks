@@ -45,6 +45,12 @@ _WHOLE_FILE = "The check covers the whole file, not windows of it."
 _LOGICAL_AXES = (
     "The axes are the logical axes of the sequence, not the physical gradient axes of a scanner."
 )
+_GAMMA = (
+    "The value is converted with the gamma of the target (opts.gamma, or 42.576 MHz/T, the "
+    "value of pypulseq, when the profile does not give it), or with the gamma of seq.system "
+    "when the limits come from the sequence object. The limit uses the same gamma, so the "
+    "value and the limit are in the same units."
+)
 
 
 def _hardware_limits(ctx: RunContext) -> HardwareLimits:
@@ -75,7 +81,16 @@ def _measurement(ctx: RunContext) -> tuple[GradientLimits, HardwareLimits]:
     """The measurement of the whole file, calculated one time for each target, and the
     `HardwareLimits` of the target."""
     limits = _hardware_limits(ctx)
-    return ctx.measure("gradient_limits", lambda seq: gradient_limits(seq, limits=limits)), limits
+    # The same gamma as the limits of `_hardware_limits`, so value and limit are in the same
+    # units.
+    if ctx.limits_source == "sequence object":
+        gamma = ctx.sequence.system.gamma
+    else:
+        gamma = ctx.profile.make_opts().gamma
+    measurement = ctx.measure(
+        "gradient_limits", lambda seq: gradient_limits(seq, limits=limits, gamma=gamma)
+    )
+    return measurement, limits
 
 
 class _GradientCheck:
@@ -133,7 +148,9 @@ class _AmplitudeAxis(_GradientCheck):
             "absolute amplitude of any gradient event on that axis. "
             + _SEGMENTS
             + " The maximum is at a corner point. The amplitude is converted from Hz/m to "
-            "mT/m with gamma = 42.576 MHz/T. "
+            "mT/m. "
+            + _GAMMA
+            + " "
             + _WHOLE_FILE
             + " "
             + _LOGICAL_AXES
@@ -194,7 +211,9 @@ class _SlewAxis(_GradientCheck):
             "difference between the raster of the file and the raster of the target is the "
             "subject of timing.rasters. The "
             "return to 0 after the last block is not a junction and is not counted. The slew "
-            "is converted from Hz/m/s to T/m/s with gamma = 42.576 MHz/T. "
+            "is converted from Hz/m/s to T/m/s. "
+            + _GAMMA
+            + " "
             + _WHOLE_FILE
             + " "
             + _LOGICAL_AXES
@@ -247,8 +266,9 @@ class _AmplitudeAnyOrientation(_GradientCheck):
             "magnitude of the gradient vector of the three logical axes at the same time. "
             + _SEGMENTS
             + " |G| is convex between the corner points of the three axes, so the maximum is "
-            "at one of them. The amplitude is converted from Hz/m to mT/m with gamma = "
-            "42.576 MHz/T. "
+            "at one of them. The amplitude is converted from Hz/m to mT/m. "
+            + _GAMMA
+            + " "
             + _WHOLE_FILE
             + " A scanner rotates the logical axes onto its physical axes for the orientation "
             "of the scan. The amplitude on a physical axis is at most |G| at each time, and "

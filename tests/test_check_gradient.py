@@ -37,6 +37,7 @@ TRAPEZOID = 2 * RISE + FLAT  # s, the duration of trap()
 DELAY = 1e-3  # s
 # A limit that no sequence of these tests reaches, for the limit that a test does not use.
 FAR = 1e6
+GAMMA_40 = 40e6  # Hz/T, a gamma that is not the 42.576 MHz/T of pypulseq
 
 
 def trap(axis: str, amplitude_mt_per_m: float, system: pp.Opts = BIG):
@@ -361,7 +362,7 @@ def test_a_target_with_one_limit_gives_not_evaluated_for_the_checks_of_the_other
 
 def test_a_target_with_one_limit_gives_the_other_as_nan_and_its_name_as_the_label(monkeypatch):
     """The limits of a target with only `opts.max_grad` come from its `pp.Opts`, with the gamma
-    of that Opts (40 MHz/T, not the 42.576 MHz/T of the measurement), and the other limit is
+    of that Opts (40 MHz/T, the gamma that the measurement uses too), and the other limit is
     nan. `gradient_limits` is not called with None."""
     install(monkeypatch, *CHECKS)
     calls = spy_on_gradient_limits(monkeypatch)
@@ -431,7 +432,8 @@ def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp
     assert {r.state for r in matrix.results} == {State.PASS}
     assert len(calls) == 2
     assert [call["limits"] for call in calls] == [t.hardware_limits for t in targets]
-    assert all(call.keys() == {"limits"} for call in calls)
+    assert all(call.keys() == {"limits", "gamma"} for call in calls)
+    assert [call["gamma"] for call in calls] == [GAMMA, GAMMA]
 
 
 def test_the_three_checks_of_one_target_call_gradient_limits_one_time(monkeypatch):
@@ -464,6 +466,66 @@ def test_limits_from_sequence_uses_the_limits_of_seq_system(monkeypatch):
     assert (slew.value, slew.limit) == (pytest.approx(100.0), pytest.approx(150.0))
     vector = results["gradient.amplitude.any-orientation"]
     assert (vector.value, vector.limit) == (pytest.approx(20.0), pytest.approx(28.0))
+
+
+def test_limits_from_sequence_converts_values_and_limits_with_the_gamma_of_seq_system(
+    monkeypatch,
+):
+    """`seq.system` has 40 MHz/T: its limits are 28 mT/m and 150 T/m/s, and the values of a 20
+    mT/m trapezoid (rise time 200 us) are 20 mT/m and 100 T/m/s, all with that gamma."""
+    install(monkeypatch, *CHECKS)
+    system = pp.Opts(max_grad=28, grad_unit="mT/m", max_slew=150, slew_unit="T/m/s", gamma=GAMMA_40)
+    gx = pp.make_trapezoid(
+        channel="x", amplitude=20e-3 * GAMMA_40, rise_time=200e-6, flat_time=400e-6, system=system
+    )
+    seq = build((gx,), system=system)
+
+    matrix = run_checks(seq, [make_profile()], limits_from_sequence=True)
+
+    results = {r.check_id: r for r in matrix.results}
+    assert {r.state for r in results.values()} == {State.PASS}
+    for check_id, value, limit in [
+        ("gradient.amplitude.axis", 20.0, 28.0),
+        ("gradient.slew.axis", 100.0, 150.0),
+        ("gradient.amplitude.any-orientation", 20.0, 28.0),
+    ]:
+        assert (results[check_id].value, results[check_id].limit) == (
+            pytest.approx(value),
+            pytest.approx(limit),
+        ), check_id
+
+
+@pytest.mark.parametrize(
+    ("check", "value", "unit"),
+    [
+        (AMPLITUDE_AXIS, 21.0, "mT/m"),
+        (SLEW_AXIS, 210.0, "T/m/s"),
+        (AMPLITUDE_ANY_ORIENTATION, 21.0, "mT/m"),
+    ],
+    ids=[c.spec.id for c in CHECKS],
+)
+def test_a_profile_with_another_gamma_compares_value_and_limit_with_that_gamma(
+    monkeypatch, tmp_path, check, value, unit
+):
+    """R3: gamma 40 MHz/T, a 21 mT/m gradient (840 kHz/m, slew 210 T/m/s) and the limits
+    20 mT/m and 200 T/m/s. With 42.576 MHz/T the value would be 19.7 mT/m and pass."""
+    install(monkeypatch, check)
+    system = pp.Opts(
+        max_grad=100, grad_unit="mT/m", max_slew=1000, slew_unit="T/m/s", gamma=GAMMA_40
+    )
+    gx = pp.make_trapezoid(
+        channel="x", amplitude=21e-3 * GAMMA_40, rise_time=RISE, flat_time=FLAT, system=system
+    )
+    path = tmp_path / "gamma40.seq"
+    build((gx,), system=system).write(str(path))
+    profile = make_profile(max_grad=20.0, max_slew=200.0, gamma=GAMMA_40)
+
+    (result,) = run_checks(path, [profile]).results
+
+    assert result.state is State.FAIL
+    assert result.value == pytest.approx(value, rel=1e-4)
+    assert result.limit == pytest.approx(20.0 if unit == "mT/m" else 200.0)
+    assert result.unit == unit
 
 
 def test_a_rotation_gives_error_for_the_three_checks(monkeypatch):

@@ -21,7 +21,9 @@ class _SafePns:
             "values of the three axes, each as a fraction of the stimulation limit of "
             "that axis. `pns_levels` calculates it with the SAFE model of the pinned "
             "pypulseq fork (`_safe_gwf_to_pns_chunk`, the chunk form of the model of "
-            "`calc_pns`) and the SAFE parameters of the target."
+            "`calc_pns`) and the SAFE parameters of the target. The gradient is divided by "
+            "the gamma of seq.system. For a file, that is the gamma of the target (opts.gamma, "
+            "or 42.576 MHz/T, the value of pypulseq, when the profile does not give it)."
         ),
         inputs=(),
         models=("pns.safe",),
