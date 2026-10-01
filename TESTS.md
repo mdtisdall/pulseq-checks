@@ -346,7 +346,8 @@ passes, showing the report if it does not.
 block (`GradientSampler.block_samples`), runs the SAFE model of the pinned pypulseq
 fork (`_safe_gwf_to_pns_chunk`) over them in chunks, and keeps only the stored level
 (the minimum and the maximum of the total in fixed time bins) and the summary (the
-peak, the peak time and the axis peaks); and `bin_samples_for`, which picks the bin
+peak, the peak time and the axis peaks), and the intervals of consecutive samples
+whose total is at or above the stimulation limit (`PnsInterval`, `above_limit`); and `bin_samples_for`, which picks the bin
 size. The reference for most tests is `seq.calculate_pns` of the pinned fork
 (decision 6 of section 2.2 of the plan: this project does not test pypulseq itself,
 only compares this library's output with pypulseq's or with its own other output).
@@ -466,13 +467,13 @@ bins, so the sizes give chunks of 1, 2 and 7 bins and one chunk bigger than the 
 #### `test_no_gradients`
 
 **Checks:** A sequence with no gradient event gives `reason=NO_GRADIENTS`, no
-stored bins, a peak of 0, `peak_time_s` of `None`, zero axis peaks, and still the
-example hardware and its `hw` fields.
+stored bins, a peak of 0, `peak_time_s` of `None`, zero axis peaks, no interval at or
+above the limit, and still the example hardware and its `hw` fields.
 
 **How:** `pns_levels(empty_sequence())`. Checks `reason`, `hardware`, `asc_file`,
 the `(0,)` shape of `level_min`/`level_max`, `peak == 0.0`, `peak_time_s is None`,
-`axis_peaks == {"x": 0.0, "y": 0.0, "z": 0.0}`, and `hw` against the 8 kept fields
-of `safe_example_hw()`.
+`axis_peaks == {"x": 0.0, "y": 0.0, "z": 0.0}`, `hw` against the 8 kept fields
+of `safe_example_hw()`, and `above_limit == ()`.
 
 **Assumptions:** None.
 
@@ -495,6 +496,70 @@ that `num_samples` is at least the length of `calculate_pns`'s result: `pns_leve
 covers the whole sequence, and `calc_pns` stops at the last gradient point.
 
 **Assumptions:** None.
+
+#### `test_a_sequence_below_the_limit_has_no_interval_and_one_above_it_has_some`
+
+**Checks:** `above_limit` is empty if and only if `peak < 1`. For a sequence above the
+limit, the largest interval peak equals `peak`, each interval has a peak of at least 1
+and a peak time between its start and its end, its `num_samples` is the number of
+samples from its start to its end, and the intervals are in time order with at least
+one sample below the limit between two of them.
+
+**How:** `gre_sequence(num_trs=20)` with the example hardware has a peak below 1 and
+no interval. Then the stimulation limit of each axis is scaled with the peak of the
+example hardware, so that the peak is 1.5 (`_hardware_for_peak`; the total is the
+percent of the limit), and `pns_levels` runs with that hardware as `hardware`. The
+sample of a time is `round(t / dt - 0.5)`.
+
+**Assumptions:** The sequence gives more than one interval at that peak.
+
+#### `test_the_intervals_do_not_depend_on_chunk_samples`
+
+**Checks:** The result, every field and so every interval, is exactly the same for a
+chunk of 1 bin, for a chunk with an interval across its end (the interval is one
+interval, not two), and for one chunk larger than the whole file.
+
+**How:** `gre_sequence(num_trs=20)` with hardware that gives a peak of 3.
+`reference` is `pns_levels` with the `CHUNK_SAMPLES` of the module.
+The test searches the chunks of 1 to 19 bins for the first one where the last sample of
+an interval is in a later chunk than its first sample, and fails if there is none. Then
+`monkeypatch.setattr` sets `CHUNK_SAMPLES` of `pulseq_checks.pns_levels` to 1, to that
+size and to a size larger than the file, and the whole `PnsLevels` is compared with the
+reference (`numpy.array_equal` for the arrays, `==` for the rest).
+
+**Assumptions:** The test checks that the second size has an interval across a chunk
+end and the third has none. Setting a chunk of 1 sample gives chunks of 1 bin
+(`pns_levels` rounds the chunk up to a whole number of bins).
+
+#### `test_the_intervals_match_the_runs_of_the_totals`
+
+**Checks:** The start, the end, the peak, the peak time and the number of samples of
+each interval equal the runs of `total >= 1` in the totals of the whole sequence, for a
+sequence on the raster and for one with a block off it (the path of
+`GradientSampler.sample`).
+
+**How:** Parametrized with `gre_sequence(num_trs=20)` and `_off_raster_sequence()`, each
+with hardware that gives a peak of 1.5. The test sets `CHUNK_SAMPLES` to `10**9` (one
+chunk) and wraps `_chunk_total` to keep the totals it returns. It finds the runs of
+`total >= 1` with `itertools.groupby`, and takes the peak as the maximum of the run and
+the peak time as its first sample with that value. The expected `PnsInterval` tuple is
+compared with `above_limit` with `==` (exact).
+
+**Assumptions:** The off-raster sequence has at least one interval at that peak.
+
+#### `test_two_separate_intervals_are_in_time_order`
+
+**Checks:** Two trapezoids on x with a gap of 50 ms give two intervals: the first ends
+before the middle of the gap and the second starts at or after the end of the gap.
+
+**How:** The hardware has a peak of 1.02 for one trapezoid, so that only the larger of
+the two humps of the total of a trapezoid is at or above 1. The test checks that one
+trapezoid gives one interval, then compares the two intervals of the sequence of two
+trapezoids (a trapezoid, `pp.make_delay(50e-3)`, the same trapezoid) with the
+trapezoid duration and the gap.
+
+**Assumptions:** The decay of the filters after a trapezoid does not keep the total at
+or above 1 for half of the gap.
 
 #### `test_asc_hardware_file_is_used_for_the_levels`
 
@@ -5214,6 +5279,88 @@ and the two values with each other.
 **Assumptions:** The raster of the target is the raster that pypulseq uses for the missing
 definition (`seq.system`). The difference of the two values shows that `pns_levels` uses the
 raster (`dt` and the sample times); the test does not check the size of the difference.
+
+#### `test_a_pass_has_no_findings`
+
+**Checks:** With the passing scale the state is "pass", `findings` is empty and
+`findings_omitted` is 0.
+
+**How:** The test runs the check on the gradient-echo `.seq` file with the passing scale.
+
+**Assumptions:** None.
+
+#### `test_a_sequence_without_gradients_has_no_findings`
+
+**Checks:** A sequence with a delay block only gives no finding, also with the failing scale.
+
+**How:** The test runs the check on `empty_sequence()`, with the failing scale.
+
+**Assumptions:** None.
+
+#### `test_a_fail_gives_one_finding_for_each_interval_in_time_order`
+
+**Checks:** The failing case gives one finding for each interval of `above_limit` of
+`pns_levels_for` (same sequence, same SAFE parameters), in the same order. Each finding has
+the code `PNS_ABOVE_LIMIT`, the time `start_s` of its interval and the block ID of the last
+block that starts at or before that time in its location, the five data values (`start_s`,
+`end_s`, `peak_percent` as 100 times the interval peak, `peak_time_s`, `num_samples`), and
+the message with the start, the end and the peak. The times of the locations do not
+decrease.
+
+**How:** The test runs the check on `gre_sequence(num_trs=2)` with the failing scale and
+computes the expected values from `pns_levels_for` and `sequence_index`. It finds the block
+with a loop over the blocks (`block_at`), not with `np.searchsorted`.
+
+**Assumptions:** The failing case has at least one interval. The message is built in the
+test with the same format as in the check, so a change of the format needs a change of the
+test.
+
+#### `test_the_data_and_the_location_of_a_finding_are_python_scalars`
+
+**Checks:** The block of the location is a Python `int`, its time and each data value but
+`num_samples` are Python `float`, and `num_samples` is a Python `int` (not NumPy scalars).
+
+**How:** The test checks `type(value) is ...` for each finding of the failing case.
+
+**Assumptions:** The failing case has at least one finding.
+
+#### `test_the_value_and_the_location_of_the_result_do_not_change_with_the_findings`
+
+**Checks:** The largest `peak_percent` of the findings equals the value of the result. The
+value is 100 times the peak of `pns_levels_for`, the limit and unit are 100.0 and `%`, the
+location is the time `peak_time_s` and its block, and `reason` is None.
+
+**How:** The test runs the failing case and compares the result with `pns_levels_for` and
+`sequence_index`.
+
+**Assumptions:** The largest peak of the intervals is the peak (`pns_levels`,
+`test_a_sequence_below_the_limit_has_no_interval_and_one_above_it_has_some`).
+
+#### `test_two_separate_intervals_give_two_findings_in_time_order`
+
+**Checks:** Two equal trapezoids on x with a 50 ms gap give two findings. They are in time
+order, and the code, the location and the times of each are those of the interval of
+`pns_levels_for` with the same number. The two findings have different blocks, and the end of
+the first is before the start of the second.
+
+**How:** The limit scale is the peak of one trapezoid with a scale of 1, divided by 1.02,
+so that only the larger hump of the total of a trapezoid is at or above 100 %. The test
+checks that one trapezoid gives one interval and that two trapezoids give two, then runs the
+check on the sequence of two. The scale is the peak divided by 1.02 because the peak is
+proportional to the inverse of the scale; the test checks the number of intervals, not that
+proportion.
+
+**Assumptions:** The decay of the filters after a trapezoid does not keep the total at or
+above 100 % until the second trapezoid.
+
+#### `test_the_spec_has_the_findings_text`
+
+**Checks:** The version of the spec is 1, and its `findings` is a text that names the code
+`PNS_ABOVE_LIMIT`.
+
+**How:** The test reads `SAFE.spec`.
+
+**Assumptions:** None.
 
 #### `test_the_spec_gives_each_field`
 

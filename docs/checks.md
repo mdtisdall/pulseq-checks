@@ -115,11 +115,11 @@ Peripheral nerve stimulation, SAFE model
 
 **Tolerance:** None: the rule of pypulseq, `pns_norm < 1` (decision 5 of the plan), with no added tolerance.
 
-**Pass condition:** The peak is below 100 % of the stimulation limit. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster.
+**Pass condition:** The peak is below 100 % of the stimulation limit. The check is "not evaluated" when the file does not declare GradientRasterTime or BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime or rasters.BlockDurationRaster). The check does not use a default of pypulseq for a raster. The result also gives each interval at or above 100 % as a finding (see Findings).
 
 **pypulseq function:** `_safe_gwf_to_pns_chunk` and `calc_pns` of pypulseq.utils.safe_pns_prediction (the pinned fork)
 
-**Findings:** None
+**Findings:** One finding for each interval of consecutive samples where the SAFE total is at or above 100 % of the stimulation limit, in time order. A fail has at least one finding, and a pass has none. The code is PNS_ABOVE_LIMIT. The location is the block ID of the block that holds the first sample of the interval (the last block that starts at or before it) and the time of that sample, in seconds from the start of the sequence. The data are start_s and end_s (the times of the first and the last sample of the interval, in seconds from the start of the sequence), peak_percent (the largest total in the interval, in percent of the stimulation limit), peak_time_s (the time of the first sample with that total, in seconds from the start of the sequence) and num_samples (the number of samples of the interval). The message is the start and the end, with up to 6 significant digits, and the peak, with up to 4, for example "PNS at or above 100 % from 0.0123 s to 0.0125 s, peak 104.2 %". The largest peak_percent of the findings is the value of the result.
 
 ## `timing.pypulseq`
 

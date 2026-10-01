@@ -1,5 +1,7 @@
 import dataclasses
+import itertools
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pypulseq as pp
@@ -22,8 +24,10 @@ from pulseq_checks.pns_levels import (
     PEAK_TOLERANCE,
     SAFE_FIELDS,
     SAFE_MODEL,
+    PnsInterval,
     PnsLevels,
     _cast_outward,
+    _chunk_total,
     bin_samples_for,
     hw_from_dict,
     pns_levels,
@@ -213,6 +217,7 @@ def test_no_gradients():
     assert levels.peak_time_s is None
     assert levels.axis_peaks == {"x": 0.0, "y": 0.0, "z": 0.0}
     assert levels.hw == _hw_dict(safe_example_hw())
+    assert levels.above_limit == ()
 
 
 def test_off_raster_block_falls_back_to_sampling():
@@ -238,6 +243,145 @@ def test_off_raster_block_falls_back_to_sampling():
     assert levels.peak_time_s == pytest.approx(ref_peak_time, abs=1e-9)
     for i, axis in enumerate("xyz"):
         assert levels.axis_peaks[axis] == pytest.approx(float(comp[:, i].max()), abs=tol)
+
+
+def _scaled_hardware(factor: float) -> tuple[SimpleNamespace, str]:
+    """The example hardware with the stimulation limit of each axis multiplied by `factor`
+    (a smaller limit gives a larger total: the total is the percent of the limit), as the
+    `hardware` argument of `pns_levels`."""
+    hw = safe_example_hw()
+    for axis in "xyz":
+        getattr(hw, axis).stim_limit *= factor
+    return hw, "SCALED"
+
+
+def _hardware_for_peak(seq: pp.Sequence, peak: float) -> tuple[SimpleNamespace, str]:
+    """Hardware with which `seq` has the peak `peak` (up to float rounding): the peak of the
+    example hardware is divided by `peak` to give the factor of the stimulation limit."""
+    return _scaled_hardware(pns_levels(seq).peak / peak)
+
+
+def _sample_range(interval: PnsInterval, dt: float) -> tuple[int, int]:
+    """The first and the last sample of `interval`, from its times `(k + 0.5) * dt`."""
+    return round(interval.start_s / dt - 0.5), round(interval.end_s / dt - 0.5)
+
+
+def test_a_sequence_below_the_limit_has_no_interval_and_one_above_it_has_some():
+    """`above_limit` is empty if and only if `peak < 1`; the largest interval peak is `peak`;
+    the intervals are in time order, do not touch, and have the times and the count that
+    their fields give."""
+    seq = gre_sequence(num_trs=20)
+    below = pns_levels(seq)
+    assert below.peak < 1
+    assert below.above_limit == ()
+
+    levels = pns_levels(seq, hardware=_hardware_for_peak(seq, 1.5))
+    dt = levels.dt_s
+    assert levels.peak >= 1
+    assert len(levels.above_limit) > 1
+    assert max(i.peak for i in levels.above_limit) == levels.peak
+    for i in levels.above_limit:
+        first, last = _sample_range(i, dt)
+        assert i.peak >= 1
+        assert i.start_s <= i.peak_time_s <= i.end_s
+        assert i.num_samples == last - first + 1
+    for a, b in itertools.pairwise(levels.above_limit):
+        assert a.end_s + dt < b.start_s  # at least one sample below the limit between them
+
+
+def test_the_intervals_do_not_depend_on_chunk_samples(monkeypatch):
+    """With chunks of 1 bin, with a chunk size that has an interval across the end of a
+    chunk, and with the normal `CHUNK_SAMPLES`, `pns_levels` gives the same result, every
+    field exactly, including the intervals."""
+    seq = gre_sequence(num_trs=20)
+    hardware = _hardware_for_peak(seq, 3.0)
+    reference = pns_levels(seq, hardware=hardware)
+    dt, bin_samples = reference.dt_s, reference.bin_samples
+    ranges = [_sample_range(i, dt) for i in reference.above_limit]
+    assert len(ranges) > 1
+
+    def crosses(chunk: int) -> bool:
+        """Whether an interval has a sample in a chunk and the next sample in the next."""
+        return any(last // chunk > first // chunk for first, last in ranges)
+
+    across = next((n * bin_samples for n in range(1, 20) if crosses(n * bin_samples)), None)
+    assert across is not None, "no chunk size of 1 to 19 bins has an interval across a chunk end"
+    assert not crosses(bin_samples * (reference.num_samples // bin_samples + 10))
+
+    for chunk_samples in (1, across, bin_samples * (reference.num_samples // bin_samples + 10)):
+        monkeypatch.setattr("pulseq_checks.pns_levels.CHUNK_SAMPLES", chunk_samples)
+        _assert_levels_equal(pns_levels(seq, hardware=hardware), reference, ignore=())
+    monkeypatch.setattr("pulseq_checks.pns_levels.CHUNK_SAMPLES", across)
+    assert pns_levels(seq, hardware=hardware).above_limit == reference.above_limit
+
+
+@pytest.mark.parametrize(
+    ("build", "on_raster"),
+    [(lambda: gre_sequence(num_trs=20), True), (_off_raster_sequence, False)],
+    ids=["on raster", "off raster"],
+)
+def test_the_intervals_match_the_runs_of_the_totals(monkeypatch, build, on_raster):
+    """The start, the end, the peak, the peak time and the number of samples of each
+    interval equal the runs of `total >= 1` that plain NumPy and `itertools.groupby` find
+    in the totals of the whole sequence, with the model run on it in one chunk."""
+    seq = build()
+    hardware = _hardware_for_peak(seq, 1.5)
+    totals = []
+
+    def record(gwf, dt, hw_ns, state):
+        result = _chunk_total(gwf, dt, hw_ns, state)
+        totals.append(result[0])
+        return result
+
+    monkeypatch.setattr("pulseq_checks.pns_levels.CHUNK_SAMPLES", 10**9)
+    monkeypatch.setattr("pulseq_checks.pns_levels._chunk_total", record)
+    levels = pns_levels(seq, hardware=hardware)
+    assert levels.on_raster is on_raster
+    total, dt = totals[0], levels.dt_s  # the rerun for the peak time records the same total
+    assert total.shape[0] == levels.num_samples
+
+    expected = []
+    position = 0
+    for above, group in itertools.groupby(total >= 1):
+        length = len(list(group))
+        if above:
+            run = total[position : position + length]
+            peak_sample = position + int(np.flatnonzero(run == run.max())[0])
+            expected.append(
+                PnsInterval(
+                    start_s=(position + 0.5) * dt,
+                    end_s=(position + length - 1 + 0.5) * dt,
+                    peak=float(run.max()),
+                    peak_time_s=(peak_sample + 0.5) * dt,
+                    num_samples=length,
+                )
+            )
+        position += length
+    assert len(expected) >= 1
+    assert levels.above_limit == tuple(expected)
+
+
+def test_two_separate_intervals_are_in_time_order():
+    """Two equal trapezoids on x with a 50 ms gap give two intervals, the first before the
+    gap and the second after it, with hardware for which one trapezoid alone gives one
+    interval."""
+    gap = 50e-3
+    trapezoid = pp.make_trapezoid(channel="x", area=1000, system=SYSTEM)
+    duration = trapezoid.rise_time + trapezoid.flat_time + trapezoid.fall_time
+    one = pp.Sequence(SYSTEM)
+    one.add_block(trapezoid)
+    two = pp.Sequence(SYSTEM)
+    two.add_block(trapezoid)
+    two.add_block(pp.make_delay(gap))
+    two.add_block(trapezoid)
+    hardware = _hardware_for_peak(one, 1.02)  # only the larger hump of a trapezoid is above 1
+    assert len(pns_levels(one, hardware=hardware).above_limit) == 1
+
+    first, second = pns_levels(two, hardware=hardware).above_limit
+    assert first.end_s < duration + gap / 2 < second.start_s
+    assert second.start_s >= duration + gap  # the second trapezoid starts there
+    assert first.peak >= 1
+    assert second.peak >= 1
 
 
 @pytest.fixture

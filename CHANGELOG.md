@@ -68,6 +68,17 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   that gives the gradient values of each block. The value, the limit, the
   location and the state of each result do not change. The specification
   version of each check stays 1, because the verdict does not change.
+- **`pns.safe` gives its findings**: one finding for each interval of
+  consecutive samples where the SAFE total is at or above 100 %, in time order.
+  The code is `PNS_ABOVE_LIMIT`. The location is the block of the first sample
+  of the interval and its time, and `data` has `start_s`, `end_s`,
+  `peak_percent`, `peak_time_s` (all in seconds, or in percent of the
+  stimulation limit) and `num_samples`. `pns_levels.PnsLevels.above_limit` (a
+  tuple of the new `pns_levels.PnsInterval`) is new and public. `pns_levels`
+  finds the intervals in its chunk loop, with no second pass over the samples.
+  The value, the limit, the location and the state of each result do not
+  change. The specification version stays 1, because the verdict does not
+  change.
 
 ### Changed
 
