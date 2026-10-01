@@ -127,8 +127,9 @@ Notes:
 - A check uses a value only when the profile gives it. A key that the profile
   does not give has the default of pypulseq inside the `Opts` object that
   reads the sequence, but no check uses such a value: the check gives "not
-  evaluated". The one use of a default is `gamma`, for the conversion of the
-  units of `max_grad` and `max_slew` (pypulseq: 42.576 MHz/T).
+  evaluated". The one use of a default is `gamma` (pypulseq: 42.576 MHz/T) when
+  the profile does not give it: for the units of the limits, for the units of
+  the gradient values, and for the SAFE model.
 - `rise_time` with `max_grad` gives the slew limit: pypulseq calculates
   `max_slew` as `max_grad / rise_time`. The checks then use this value as
   `opts.max_slew` (`TargetProfile.has_value("opts.max_slew")` is true), but

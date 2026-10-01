@@ -55,6 +55,31 @@ def test_trapezoid_peak_slew_and_rms_match_hand_computed_values():
     assert axis.rms_mt_per_m == pytest.approx(rms_mt_per_m)
 
 
+def test_gamma_converts_the_values_and_the_default_limits_with_that_gamma():
+    seq = spin_echo_sequence()
+    window = (0.0, sequence_index(seq).end_s / 2)
+    gamma = 40e6
+    scale = GAMMA / gamma
+
+    default = gradient_limits(seq, window=window)
+    result = gradient_limits(seq, window=window, gamma=gamma)
+
+    assert result.vector_peak_mt_per_m > 0.0
+    assert result.vector_peak_mt_per_m == pytest.approx(default.vector_peak_mt_per_m * scale)
+    for axis, values in result.axes.items():
+        expected = default.axes[axis]
+        assert values.peak_mt_per_m == pytest.approx(expected.peak_mt_per_m * scale)
+        assert values.max_slew_t_per_m_per_s == pytest.approx(
+            expected.max_slew_t_per_m_per_s * scale
+        )
+        assert values.rms_mt_per_m == pytest.approx(expected.rms_mt_per_m * scale)
+        assert result.whole_rms_mt_per_m[axis] == pytest.approx(
+            default.whole_rms_mt_per_m[axis] * scale
+        )
+    assert result.limits.max_grad_mt_per_m == pytest.approx(seq.system.max_grad / gamma * 1e3)
+    assert result.limits.max_slew_t_per_m_per_s == pytest.approx(seq.system.max_slew / gamma)
+
+
 def test_same_trapezoid_on_x_and_y_gives_vector_peak_root_2_times_axis_peak():
     """The same trapezoid, played on x and on y at the same time: the vector peak is
     the axis peak times sqrt(2), because at every point Gx == Gy, so

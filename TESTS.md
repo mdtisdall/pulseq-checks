@@ -1261,6 +1261,20 @@ trapezoid's own block ID.
 - The trapezoid's `fall_time` equals its `rise_time`, which is
   `pp.make_trapezoid`'s default when only `rise_time` is given.
 
+#### `test_gamma_converts_the_values_and_the_default_limits_with_that_gamma`
+
+**Checks:** `gradient_limits(seq, gamma=40e6)` gives the amplitudes (mT/m), the slew
+rates (T/m/s), the RMS amplitudes (of the window and of the whole file), the vector
+peak and the default limits of `seq.system`, all converted with 40 MHz/T: each value is
+the value of the default call times 42.576e6 / 40e6, and the limits are the values of
+`seq.system` in Hz/m and Hz/m/s divided by 40 MHz/T.
+
+**How:** The test calls `gradient_limits` on `spin_echo_sequence()` with a window of the
+first half of the sequence, with and without `gamma`, and compares the two results field
+by field with `pytest.approx`.
+
+**Assumptions:** The default call is correct (the other tests of this file).
+
 #### `test_same_trapezoid_on_x_and_y_gives_vector_peak_root_2_times_axis_peak`
 
 **Checks:** The same trapezoid, played on x and on y at the same time, gives a
@@ -4401,7 +4415,8 @@ limits are not None.
 function and keeps its keyword arguments), runs the three rules on a target with
 `max_grad` 20 mT/m and `gamma` 40 MHz/T, and checks the limits of the only call: the limit
 is 20 mT/m (with 42.576 MHz/T it would be 18.8), the other one is nan and the label is
-the name of the target.
+the name of the target. The measurement uses the same gamma as the limits (see
+`test_a_profile_with_another_gamma_compares_value_and_limit_with_that_gamma`).
 
 **Assumptions:** `gradient_limits` uses `limits` only as a label (checked in its code, not
 by this test), so a nan limit does not change the numbers.
@@ -4442,13 +4457,13 @@ for `gradient.slew.axis`, with `opts.max_slew` in the reason.
 
 **Checks:** For a `.seq` file and two targets, `gradient_limits` runs one time for each
 target (two times for the three rules, not six), always over the whole file (no window)
-and with the hardware limits of that target, never with None.
+and with the hardware limits and the gamma of that target, never with None.
 
 **How:** The test writes a `.seq` file, runs the three rules for two targets with
 different limits and the spy on `gradient_limits`. It checks that all six results are
 "pass", that there are two calls, that the keyword arguments of each call are only
-`limits`, and that the limits are `hardware_limits` of the target, in the order of the
-targets.
+`limits` and `gamma`, that the limits are `hardware_limits` of the target, in the order of
+the targets, and that the gamma is 42.576 MHz/T (the targets do not give `gamma`).
 
 **Assumptions:** `run_checks` reads the file one time for each target (tested in
 `test_run.py`).
@@ -4476,6 +4491,38 @@ gives no value. It checks that the three results are "pass", and their values an
 
 **Assumptions:** The limits of `SYSTEM` are 28 mT/m and 150 T/m/s. The conversion of the
 units of `seq.system` is tested in `test_run.py`, not here.
+
+#### `test_limits_from_sequence_converts_values_and_limits_with_the_gamma_of_seq_system`
+
+**Checks:** With `limits_from_sequence=True` and a `Sequence` object whose `system` has a
+gamma of 40 MHz/T, the three rules convert the values and the limits with that gamma, not
+with 42.576 MHz/T.
+
+**How:** The test builds a `pp.Opts` with the gamma 40 MHz/T and the limits 28 mT/m and
+150 T/m/s, and an x trapezoid of 20 mT/m with the rise time 200 µs (slew 100 T/m/s) with
+it. It runs the rules on a target that gives no value, and checks that the three results
+are "pass", with the values 20 mT/m, 100 T/m/s and 20 mT/m and the limits 28 mT/m,
+150 T/m/s and 28 mT/m. With 42.576 MHz/T the values would be 18.8 mT/m and 94 T/m/s.
+
+**Assumptions:** `pp.Opts` stores the limits in Hz/m and Hz/m/s with its own gamma, so the
+limits in mT/m and T/m/s are the ones that the test gave.
+
+#### `test_a_profile_with_another_gamma_compares_value_and_limit_with_that_gamma`
+
+**Checks:** (R3 of the plan `docs/plans/raster-source.md`.) A profile with `gamma` 40 MHz/T
+and the limits 20 mT/m and 200 T/m/s, and a file with a 21 mT/m gradient (slew 210 T/m/s),
+give "fail" for each of the three rules, with the value 21 mT/m, 210 T/m/s and 21 mT/m and
+the limit of the profile. The value and the limit use the same gamma.
+
+**How:** The test builds a `pp.Opts` with gamma 40 MHz/T and an x trapezoid of
+840 kHz/m (21 mT/m with that gamma) with the rise time 100 µs, writes the file to
+`tmp_path`, and runs each rule alone with `run_checks` for the profile. It checks the
+state, the value (`pytest.approx`), the limit and the unit. With the constant 42.576 MHz/T
+the amplitude would be 19.7 mT/m and the rules would pass.
+
+**Assumptions:** `run_checks` reads the file with the `pp.Opts` of the target, so
+`seq.system.gamma` is 40 MHz/T. The tests of the other checks in this file give no `gamma`,
+and so test the default of 42.576 MHz/T (the value of pypulseq).
 
 #### `test_a_rotation_gives_error_for_the_three_checks`
 
