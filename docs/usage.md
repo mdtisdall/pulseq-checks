@@ -1217,8 +1217,10 @@ def target_pns(ctx):
   Whether a file with other rasters plays correctly depends on how the
   interpreter of the target resamples the shapes, and the Pulseq specification
   does not say. A rule must come from the behavior of specific interpreters.
-  The item is in [`TODO.md`](../TODO.md). The other checks still run with the
-  rasters of the target.
+  The item is in [`TODO.md`](../TODO.md). The other checks still run:
+  `timing.pypulseq` with the rasters of the target, and the gradient checks and
+  `pns.safe` with the rasters of the file. [`rasters.md`](rasters.md) explains
+  why.
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
