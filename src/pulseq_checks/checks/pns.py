@@ -8,7 +8,7 @@ from pulseq_analysis.pns_levels import NO_GRADIENTS, PNS_LIMIT, PnsInterval
 from pulseq_analysis.seq_index import sequence_index
 
 from ..results import Finding, Location, Result, State
-from ..rules import CheckSpec, RunContext
+from ..rules import CheckPromise, CheckSpec, RunContext
 from ..safe_model import SAFE_MODEL, hw_from_dict
 
 
@@ -64,6 +64,30 @@ class _SafePns:
             "significant digits, and the peak, with up to 4, for example "
             '"PNS at or above 100 % from 0.0123 s to 0.0125 s, peak 104.2 %". The largest '
             "peak_percent of the findings is the value of the result."
+        ),
+        promise=CheckPromise(
+            on_pass=(
+                "The SAFE model of pypulseq, with the SAFE parameters of the target, predicts a "
+                "peak PNS below 100 % of the stimulation limit for the gradient waveform of the "
+                "file, with the logical axes x, y and z of the file as the physical axes of the "
+                "coil."
+            ),
+            on_fail=(
+                "The model predicts a PNS at or above 100 % of the stimulation limit at some time."
+                " The findings give each interval at or above 100 %."
+            ),
+            not_promised=(
+                "That a subject feels no stimulation: SAFE is a model, and its prediction is only "
+                "as good as the SAFE parameters of the target. The PNS when the scan rotates the "
+                "logical axes: the SAFE parameters are different for each physical axis, so a "
+                "rotation changes the PNS. The waveform that the scanner plays, when its "
+                "interpreter makes it in another way than the check: the check gives the SAFE "
+                "model the gradient waveform of the file, sampled at the gradient raster of the "
+                "file. When the GradientRasterTime or the BlockDurationRaster of the file differs "
+                "from the raster of the target (timing.rasters fails), the interpreter makes the "
+                "waveform on the scanner in a way that the check does not know, and the value "
+                "describes the waveform of the file only."
+            ),
         ),
     )
 

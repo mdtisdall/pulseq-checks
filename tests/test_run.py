@@ -9,7 +9,7 @@ from pulseq_checks import registry
 from pulseq_checks.profile import HardwareLimits, TargetProfile
 from pulseq_checks.registry import RegistryError
 from pulseq_checks.results import Finding, Location, Result, State
-from pulseq_checks.rules import DOCS_URL, CheckSpec, RunContext, spec_url
+from pulseq_checks.rules import DOCS_URL, CheckPromise, CheckSpec, RunContext, spec_url
 from pulseq_checks.run import RunError, run_checks
 
 
@@ -738,6 +738,39 @@ def install_entry_points(monkeypatch, **groups):
     monkeypatch.setattr(
         importlib.metadata, "entry_points", lambda *, group: list(by_group.get(group, []))
     )
+
+
+def test_a_spec_without_a_promise_runs_as_before(monkeypatch):
+    """A plugin gives the fields up to `rasters` by position: `promise` is the last field, with
+    the default None."""
+    spec = CheckSpec("t.a", 1, "t", "q", (), (), "l", "t", "p", "fast", None, None, None, ())
+    assert spec.promise is None
+    install(monkeypatch, Rule(spec))
+    (result,) = run_checks(spin_echo_sequence(), [make_profile()]).results
+    assert result.state is State.PASS
+
+
+def test_each_check_of_this_package_gives_a_promise_with_three_texts():
+    """Each check of the distribution pulseq-checks says what a pass guarantees, what a fail
+    means and what it does not promise."""
+    specs = [
+        ep.load().spec
+        for ep in importlib.metadata.entry_points(group=registry.CHECKS)
+        if ep.dist is not None and ep.dist.name.replace("_", "-") == "pulseq-checks"
+    ]
+    assert sorted(spec.id for spec in specs) == [
+        "gradient.amplitude.any-orientation",
+        "gradient.amplitude.axis",
+        "gradient.slew.axis",
+        "pns.safe",
+        "timing.pypulseq",
+        "timing.rasters",
+    ]
+    for spec in specs:
+        assert isinstance(spec.promise, CheckPromise), spec.id
+        for text in (spec.promise.on_pass, spec.promise.on_fail, spec.promise.not_promised):
+            assert isinstance(text, str), spec.id
+            assert text.strip(), spec.id
 
 
 def test_check_rules_are_keyed_by_spec_id(monkeypatch):

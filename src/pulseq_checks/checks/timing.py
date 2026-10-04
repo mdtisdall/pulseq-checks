@@ -13,7 +13,7 @@ from pypulseq.check_timing import error_messages
 
 from ..profile import RASTER_OPTS
 from ..results import Finding, Location, Result, State
-from ..rules import CheckSpec, RunContext
+from ..rules import CheckPromise, CheckSpec, RunContext
 
 # The relative tolerance of a comparison of two rasters. pypulseq writes a definition with
 # nine significant digits (`0.9g`), so the value in the file differs from the raster that the
@@ -147,6 +147,25 @@ class _Rasters:
             '"the file does not declare GradientRasterTime"; the message of RASTER_MISMATCH '
             'is the name, a colon, the raster of the file in seconds, "s in the file", a '
             'comma, the raster of the target in seconds and "s on the target".'
+        ),
+        promise=CheckPromise(
+            on_pass=(
+                "Each of the four rasters that the file declares in [DEFINITIONS] "
+                "(GradientRasterTime, RadiofrequencyRasterTime, AdcRasterTime and "
+                "BlockDurationRaster) equals the raster of the target, within the tolerance."
+            ),
+            on_fail=(
+                "At least one raster that the file declares differs from the raster of the target,"
+                " coarser or finer. The findings give each such raster with both values. The check"
+                " does not know whether the file plays correctly on the target: the interpreter "
+                "must make new samples for the shapes, and the Pulseq specification does not say "
+                "how."
+            ),
+            not_promised=(
+                "That the times of the events of the file are on these rasters: timing.pypulseq "
+                "checks the times that are fields of the events. That the file plays correctly on "
+                "the target: the check compares the declared rasters only."
+            ),
         ),
     )
 
@@ -316,6 +335,30 @@ class _Pypulseq:
             "without the prefix of the event and the field. For an error type without a "
             "template, or when the template fails, the message is the event, a point, the "
             "field, a colon and the error type."
+        ),
+        promise=CheckPromise(
+            on_pass=(
+                "check_timing of pypulseq gives no error for the file, read with the Opts of the "
+                "target. That is: each block duration is on the block duration raster of the "
+                "target; the delay of each event, and the rise, flat and fall time of each "
+                "trapezoid, are on the raster of the target for that event; each ADC dwell is on "
+                "the ADC raster; no delay is negative; each RF pulse starts at or after the RF "
+                "dead time and ends at least the RF ringdown time before the end of its block; "
+                "each ADC starts at or after the ADC dead time and ends at least the ADC dead time"
+                " before the end of its block; each stored block duration is the duration of the "
+                "content of its block; and the soft delays are consistent."
+            ),
+            on_fail=(
+                "check_timing gives one or more errors. The findings give each error, with its "
+                "block."
+            ),
+            not_promised=(
+                "The times of the samples and the corner points of arbitrary gradients and "
+                "extended trapezoids, and the time points of RF shapes: check_timing does not "
+                "check them. That the rasters of the file are the rasters of the target: "
+                "timing.rasters checks that. A timing rule of the target that check_timing does "
+                "not have."
+            ),
         ),
     )
 

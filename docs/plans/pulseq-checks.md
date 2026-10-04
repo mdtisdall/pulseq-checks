@@ -216,6 +216,8 @@ documentation is made from this data. A plugin check gives its specification
 in the same way, and the documentation of its package shows it. The
 specification of each check gives:
 
+- what the check promises: what a pass guarantees, what a fail means, and
+  what the check does not promise, also with a pass,
 - the quantity and its exact definition,
 - the inputs from the target profile,
 - the limit and the tolerance,

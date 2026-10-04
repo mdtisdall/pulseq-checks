@@ -3,11 +3,12 @@
 from .config import CheckConfig, ConfigError, read_check_config
 from .profile import HardwareLimits, ProfileError, TargetProfile, read_profile
 from .results import CheckRunError, Finding, Location, Result, ResultMatrix, State, TargetInfo
-from .rules import CheckRule, CheckSpec, RunContext
+from .rules import CheckPromise, CheckRule, CheckSpec, RunContext
 from .run import RunError, run_checks
 
 __all__ = [
     "CheckConfig",
+    "CheckPromise",
     "CheckRule",
     "CheckRunError",
     "CheckSpec",

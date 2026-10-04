@@ -12,6 +12,19 @@
   not based on the behavior of an interpreter does not assert anything of
   value.
 
+- **Worst-case slew and PNS under rotation.** `gradient.slew.axis` and
+  `pns.safe` measure the logical axes of the file, so what they promise holds
+  only for a scan with no rotation: a rotation can put the slews of two or
+  three logical axes on one physical axis, and the SAFE parameters differ for
+  each physical axis. Study whether the data that the checks already have (the
+  gradient waveforms of the three axes) can give the worst case over all
+  rotations, as `gradient.amplitude.any-orientation` does for the amplitude.
+  For the slew, the magnitude of the slew vector bounds each physical axis. For
+  PNS, the SAFE model filters each axis with its own parameters, so the worst
+  case is not a simple bound and needs its own study. This would be a separate
+  output (a new check or a new value), not a replacement for the checks of
+  today.
+
 - **The convention declaration (decision 10 of
   `docs/plans/pulseq-checks.md`).** Where does a sequence declare its
   coordinate and sign conventions (section 6.2), until the Pulseq community

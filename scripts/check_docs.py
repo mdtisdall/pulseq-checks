@@ -86,6 +86,14 @@ def section(spec: CheckSpec) -> str:
         ("Findings", spec.findings or "None"),
     ]
     lines = [f"## `{spec.id}`", "", spec.title, ""]
+    if spec.promise is not None:
+        # The promise comes first, each text in a paragraph of its own below its label.
+        for label, text in (
+            ("A pass promises", spec.promise.on_pass),
+            ("A fail means", spec.promise.on_fail),
+            ("Not promised", spec.promise.not_promised),
+        ):
+            lines += [f"**{label}:**", "", text, ""]
     for label, text in fields:
         first, *rest = text.split("\n\n")
         lines += [f"**{label}:** {first}", ""]
