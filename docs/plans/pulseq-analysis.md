@@ -3,8 +3,8 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved. Phases 1 to 4 are done; the release 0.1.0rc3 is next. Written
-on 2026-10-01. The user approved the answer of each decision of section 6 on
+Status: approved. Phases 1 to 4 are done, and pulseq-checks 0.1.0rc3 is the
+release (tag `v0.1.0rc3`). Phase 5 is in pulseq-reports. Written on 2026-10-01. The user approved the answer of each decision of section 6 on
 the same day.
 
 ## 1. Goal
