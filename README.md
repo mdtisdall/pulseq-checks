@@ -58,8 +58,9 @@ pulseq-check scan.seq --target prisma.toml --check gradient.slew.axis
 
 The exit status is 0 when no check failed and each required check was
 evaluated, 2 when a check failed, and 1 for an error. The profile has no SAFE
-parameters, so `pns.safe` is "not evaluated": it does not change the status,
-because the command did not name it.
+parameters and no acoustic resonances, so `pns.safe` and
+`acoustic.resonance-energy` are "not evaluated": they do not change the status,
+because the command did not name them.
 
 ## The series of an analysis
 
@@ -80,8 +81,9 @@ pypulseq's `check_timing`, and `timing.rasters` gives one finding for each
 raster that differs from the target or that the file does not declare
 correctly. The three gradient checks give one finding for each block, and
 axis, that is above the limit, and `pns.safe` gives one finding for each
-interval where the SAFE total is at or above 100 %. A plugin check can give its
-own.
+interval where the SAFE total is at or above 100 %. `acoustic.resonance-energy`
+gives one finding when more than 30 % of the gradient energy is in the acoustic
+resonance bands of the target. A plugin check can give its own.
 
 The summary on the console gives only the number of findings of each result.
 To see them there, add `--show-findings`. To pass them to another tool, write

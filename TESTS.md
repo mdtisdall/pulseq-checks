@@ -1986,7 +1986,7 @@ specification, with a text that is not empty for what a pass guarantees, what a 
 what the check does not promise.
 
 **How:** The test loads the check entry points of the distribution `pulseq-checks`, compares
-their IDs with the six checks of version 1, and checks the type of `spec.promise` and that each
+their IDs with the seven checks of this package, and checks the type of `spec.promise` and that each
 of its three texts is a string that is not empty.
 
 **Assumptions:** The test does not check that a text is true. `scripts/check_docs.py` shows the
@@ -4099,12 +4099,12 @@ that a check failed too.
 #### `test_end_to_end_with_the_installed_checks_and_the_prisma_profile`
 
 **Checks:** The command runs the installed checks on a synthetic spin-echo sequence with
-`tests/profiles/prisma.toml`, and writes a summary that has a line for each of three checks
+`tests/profiles/prisma.toml`, and writes a summary that has a line for each of four checks
 and ends with the exit status line of the status that it returns.
 
 **How:** The test runs `main` with no test rules and checks that the status is 0 or 2, that
-the IDs `gradient.amplitude.axis`, `pns.safe` and `timing.rasters` are in the output, and
-the last line.
+the IDs `acoustic.resonance-energy`, `gradient.amplitude.axis`, `pns.safe` and
+`timing.rasters` are in the output, and the last line.
 
 **Assumptions:** The test does not check the numbers or the states of the checks. The
 status can be 0 or 2, because the timing of the synthetic sequence depends on the profile
@@ -4454,5 +4454,163 @@ for `pns.safe.levels`, in this order (the model, then the raster), and each reas
 analysis ID.
 
 **How:** The test makes the context and checks the length and the text of the two reasons.
+
+**Assumptions:** None.
+
+### 2.13 Acoustic resonance check (`test_check_acoustic.py`)
+
+These tests cover the check rule `acoustic.resonance-energy` (`checks/acoustic.py`, plan
+`docs/plans/acoustic-resonance-check.md`). Most of them give the check a hand-made
+`GradientSpectrum` through a `FakeAnalysis` with the ID `gradient.spectrum`, and call the rule
+with a `RunContext`. The spectrum has the same RSS value at each frequency (or a known
+change), so the expected percent is a count of frequencies, not a second copy of the formula.
+The tests with the real analysis use bipolar trapezoid trains at a known frequency and the
+bands of `tests/profiles/prisma.toml` (590 Hz, 100 Hz wide, and 1140 Hz, 220 Hz wide).
+`registry.check_rules` gives only this check.
+
+#### `test_the_value_is_the_percent_of_the_energy_in_the_band`
+
+**Checks:** The value is the percent of the energy (the square of the RSS spectrum) in the
+band: 11 of 201 equal frequencies. The result has the limit 30, the unit `%`, no location, the
+reason `1 resonance band`, the check ID and the version 1.
+
+**How:** A flat spectrum at 0, 10, ..., 2000 Hz and the band [540, 640] Hz.
+
+**Assumptions:** None.
+
+#### `test_30_percent_passes_and_more_fails`
+
+**Checks:** The limit is 30 %. A value of exactly 30 % is a pass (decision D7: "more than 30 %"
+fails), and a value a bit above 30 % is a fail.
+
+**How:** 10 equal frequencies with 3 in the band give exactly 30.0. Then one frequency outside
+the band gets the RSS 0.999, and the value is `300 / (9 + 0.999^2)`.
+
+**Assumptions:** The float sum of ten values of 1.0 is exact.
+
+#### `test_the_band_edges_are_closed`
+
+**Checks:** A band includes its edges: [10, 30] Hz holds 10, 20 and 30 Hz. A band a bit
+narrower holds only 20 Hz.
+
+**How:** A flat spectrum at 0, 10, ..., 90 Hz and two bands.
+
+**Assumptions:** None.
+
+#### `test_the_limit_is_for_all_the_bands_together`
+
+**Checks:** The limit is for the sum over all the bands (decision D7). Two bands with 20 % each
+give 40 % and a fail, although neither band is above 30 %. The same two bands with 10 % each
+give 20 % and a pass, with the reason `2 resonance bands`.
+
+**How:** Two bands of two frequencies each, on a flat spectrum of 10 and then of 20
+frequencies.
+
+**Assumptions:** None.
+
+#### `test_a_frequency_in_two_bands_counts_one_time`
+
+**Checks:** Two bands that share a frequency count it one time: 5 of 20 frequencies, 25 %.
+
+**How:** The bands [10, 30] and [30, 50] Hz on a flat spectrum.
+
+**Assumptions:** None.
+
+#### `test_a_fail_has_one_finding_for_all_the_bands`
+
+**Checks:** A fail has exactly one finding (decision D8), with the code `ACOUSTIC_BAND_ENERGY`,
+no location, the data `energy_percent` (the value), `limit_percent`, `num_bands` and the three
+arguments of the spectrum, and the message with the percent, the number of bands and the limit.
+
+**How:** The fail of two bands with 20 % each, and a comparison of the finding with the
+expected fields.
+
+**Assumptions:** None.
+
+#### `test_a_pass_has_no_finding`
+
+**Checks:** A pass has no finding.
+
+**How:** One band with 20 % of the energy.
+
+**Assumptions:** None.
+
+#### `test_no_gradient_event_and_no_energy_pass_with_0_percent`
+
+**Checks:** A spectrum with the reason `NO_GRADIENTS` gives a pass with 0 % and the reason
+`no gradient event`. A spectrum with no energy gives a pass with 0 % and no finding. The real
+analysis on a sequence with no gradient event also gives a pass with 0 %.
+
+**How:** Two hand-made spectra, and `empty_sequence()` with the real analysis.
+
+**Assumptions:** None.
+
+#### `test_an_empty_list_of_resonances_passes_with_0_percent`
+
+**Checks:** A target with an empty list of resonances gives a pass with 0 %, no finding and the
+reason `no resonance band` (decision D6).
+
+**How:** The check with `[]` as the resonances.
+
+**Assumptions:** None.
+
+#### `test_a_target_without_resonances_is_not_evaluated`
+
+**Checks:** A target that does not give `acoustic.resonances` gives "not evaluated", with a
+reason that names the value path, and no value.
+
+**How:** `run_checks` with a `Sequence` object and a target without the resonances.
+
+**Assumptions:** The run function makes this result from `CheckSpec.inputs`.
+
+#### `test_a_band_above_the_spectrum_is_not_evaluated`
+
+**Checks:** A band that reaches above the highest frequency of the spectrum gives "not
+evaluated" (decision D4), with no value and a reason that names the band, its top and the range
+of the spectrum. A band that ends at the highest frequency is evaluated.
+
+**How:** A flat spectrum up to 90 Hz, with the bands [80, 100] Hz and [70, 90] Hz.
+
+**Assumptions:** None.
+
+#### `test_a_train_at_a_resonance_fails_and_a_train_at_300_hz_passes`
+
+**Checks:** With the real analysis and the Prisma bands, 200 bipolar trapezoids at about
+1140 Hz give a fail above 90 %, and 60 at 300 Hz give a pass below 1 %.
+
+**How:** `bipolar_train` makes the sequences; the check runs with the installed analyses.
+
+**Assumptions:** The bounds come from the measurements of section 2.3 of the plan (98 % and
+0.06 %).
+
+#### `test_a_rotation_of_the_axes_does_not_change_the_value`
+
+**Checks:** The same train on x, and rotated by 0.6 rad between x and y, give the same value
+(relative tolerance 1e-9): the RSS of the three axes does not change under a rotation.
+
+**How:** `bipolar_train` with the factors 1 on x, and cos and sin of 0.6 on x and y.
+
+**Assumptions:** The trapezoids of the rotated train have the same timing on both axes.
+
+#### `test_the_check_and_the_analysis_result_share_one_spectrum`
+
+**Checks:** For one target, the check and a requested `gradient.spectrum` analysis use one
+calculation: `gradient_spectrum_for` is called one time. The check passes, and the analysis
+result has the series `gradient_spectrum`.
+
+**How:** `gradient_spectrum_for` of `pulseq_analysis.analyses` is replaced by a function that
+counts its calls; `run_checks` runs on a GRE `.seq` file with `prisma.toml` and
+`analyses=["gradient.spectrum"]`.
+
+**Assumptions:** `run_checks` reads a file one time for each target, so the spectrum is shared
+in one target, not between targets.
+
+#### `test_the_rotation_extension_is_an_error`
+
+**Checks:** A sequence with the rotation extension gives "error" with `NotImplementedError` in
+the reason.
+
+**How:** The `Sequence` object of `_with_rotation_library` from `test_check_pns.py`, through
+`run_checks`.
 
 **Assumptions:** None.

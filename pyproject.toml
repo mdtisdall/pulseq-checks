@@ -29,6 +29,7 @@ siemens-asc = "pulseq_checks.asc_profile:read_asc_profile"
 "gradient.slew.axis" = "pulseq_checks.checks.gradient:SLEW_AXIS"
 "gradient.amplitude.any-orientation" = "pulseq_checks.checks.gradient:AMPLITUDE_ANY_ORIENTATION"
 "pns.safe" = "pulseq_checks.checks.pns:SAFE"
+"acoustic.resonance-energy" = "pulseq_checks.checks.acoustic:RESONANCE_ENERGY"
 
 [build-system]
 requires = ["hatchling"]

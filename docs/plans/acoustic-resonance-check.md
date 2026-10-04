@@ -4,7 +4,8 @@ Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
 Status: approved by the user on 2026-10-04 (all the decisions of section 5).
-Phase 1 (D5) is its own PR. Phase 2 (the check) is not started.
+Phase 1 (D5) is #49. Phase 2 (the check) is its own PR. Section 7 has the
+changes to this plan during the work.
 
 ## 1. Goal
 
@@ -46,9 +47,11 @@ check options, and a change of the analysis `gradient.spectrum`.
 
 1. The analysis `gradient.spectrum` has no parameters and no binding. Its
    `compute(seq)` is `grad_spectrum.gradient_spectrum_for(seq)`, which keeps
-   one result for each sequence object and each set of arguments. Thus
-   `ctx.analysis("gradient.spectrum")` gives one calculation for all the
-   targets of a sequence.
+   one result for each sequence object and each set of arguments. Thus the
+   check and a requested analysis result of one target share one
+   calculation. `run_checks` reads a `.seq` file one time for each target,
+   with the `Opts` of that target, so two targets have two sequence objects
+   and two calculations (section 7.1).
 2. It uses the defaults of pypulseq: `max_frequency_hz=2000.0`,
    `window_s=0.05`, `frequency_oversampling=3.0`. The frequency step is
    `1 / (window_s * frequency_oversampling)`, 6.67 Hz. There are 301
@@ -223,9 +226,9 @@ count of frequencies, not a second copy of the code.
    section 2.3.
 11. Rotation: the train on x and the same train rotated between x and y
     give the same value (relative tolerance 1e-9).
-12. Two targets of one sequence: the check uses one spectrum. Count the
-    calls of `gradient_spectrum` (or check that both targets get the same
-    object).
+12. One target: the check and the requested analysis `gradient.spectrum`
+    use one spectrum. Count the calls of `gradient_spectrum_for`
+    (section 7.1).
 13. The rotation extension: "error".
 14. `test_cli.py` or `test_run.py`: the check runs with `prisma.toml` and
     gives a result with the unit `%`.
@@ -290,4 +293,19 @@ and D8 have the correction of the user:
 
 ## 7. Results
 
-Empty until the work is done.
+### 7.1 Changes to this plan during the work
+
+1. Section 2.2, fact 1, and test 12. The plan said that the check and the
+   targets of a sequence share one spectrum. That is true for one sequence
+   object only. `run_checks` reads a `.seq` file one time for each target,
+   so each target has its own sequence object and its own calculation. The
+   check and a requested analysis result of one target share one
+   calculation. This is correct: when the file does not declare its
+   rasters, each target gives them, and the spectrum can differ between
+   targets. No change to `run.py`.
+2. Section 3.2. On a pass with no gradient event, `reason` is
+   `no gradient event`. With an empty list of resonances, it is
+   `no resonance band`.
+3. Section 4, test 9 (the real spectrum of `spin_echo_sequence()`) is not
+   a test: it would repeat the formula of the check. The tests with a
+   train at a known frequency cover the real analysis.

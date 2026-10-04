@@ -21,6 +21,18 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   is now also a dependency of pulseq-analysis. The format stays 1, and no
   check changes.
 
+- **The check `acoustic.resonance-energy`**
+  (`docs/plans/acoustic-resonance-check.md`). It compares the gradient
+  spectrum of the sequence (the analysis `gradient.spectrum`, with the
+  defaults of pypulseq, 0 Hz to 2000 Hz) with the acoustic resonances of the
+  target (`acoustic.resonances`). The value is the percent of the energy of
+  the spectrum (the square of the RSS spectrum) in the bands
+  `[f - bw/2, f + bw/2]`, all the bands together. It fails when the value is
+  above 30 %, a constant of the check and not a limit of a vendor. A fail has
+  one finding, `ACOUSTIC_BAND_ENERGY`, for all the bands. A band above
+  2000 Hz gives "not evaluated", and an empty list of resonances gives a pass
+  with 0 %. It is a slow check, and its specification is version 1.
+
 ### Changed
 
 - **pulseq-analysis `0.1.0rc3`** in place of `0.1.0rc2`. A series object of

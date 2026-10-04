@@ -33,6 +33,7 @@ The checks of version 1:
 | `gradient.slew.axis` | `opts.max_slew`, or `opts.max_grad` and `opts.rise_time`, and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
 | `gradient.amplitude.any-orientation` | `opts.max_grad`, and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
 | `pns.safe` | the SAFE parameters, `[models.pns.safe]` (from the profile file or from an `.asc` file), and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
+| `acoustic.resonance-energy` | `acoustic.resonances` (from the profile file or from an `.asc` file), and `rasters.GradientRasterTime` and `rasters.BlockDurationRaster` (when the file does not declare them) |
 
 The quantity, the limit, the tolerance, the pass condition and the cost class
 of each check are in [`checks.md`](checks.md). Each result links to its
@@ -66,7 +67,9 @@ target or that the file does not declare correctly. The three gradient checks
 (`gradient.amplitude.axis`, `gradient.slew.axis` and
 `gradient.amplitude.any-orientation`) give one finding for each block, and
 axis, that is above the limit. `pns.safe` gives one finding for each interval
-of samples where the SAFE total is at or above 100 %. A plugin check
+of samples where the SAFE total is at or above 100 %.
+`acoustic.resonance-energy` gives one finding on a fail, for all the
+resonance bands together. A plugin check
 can give its own ([section 7](#a-check-rule)). The specification of a check in
 [`checks.md`](checks.md) says what its findings are.
 
@@ -199,8 +202,9 @@ not an error (see [2.7](#27-the-rules)).
 `resonances`: a list of `[frequency, bandwidth]` pairs of the acoustic
 resonances of the gradient system, in Hz. Each frequency and each bandwidth
 is a finite number above 0; another value is an error, also when the `.asc`
-file gives it. An empty list is valid: the target has no resonance. No check
-of version 1 uses it. It is in `TargetProfile.acoustic_resonances`.
+file gives it. An empty list is valid: the target has no resonance. The check
+`acoustic.resonance-energy` uses it. It is in
+`TargetProfile.acoustic_resonances`.
 
 ### 2.6 The `.asc` file
 

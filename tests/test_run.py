@@ -1135,6 +1135,7 @@ def test_each_check_of_this_package_gives_a_promise_with_three_texts():
         if ep.dist is not None and ep.dist.name.replace("_", "-") == "pulseq-checks"
     ]
     assert sorted(spec.id for spec in specs) == [
+        "acoustic.resonance-energy",
         "gradient.amplitude.any-orientation",
         "gradient.amplitude.axis",
         "gradient.slew.axis",
