@@ -3,9 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved by the user on 2026-10-04 (all the decisions of section 5).
-Phase 1 (D5) is #49. Phase 2 (the check) is its own PR. Section 7 has the
-changes to this plan during the work.
+Status: done (2026-10-04). Phase 1 (D5) is #49, and phase 2 (the check
+`acoustic.resonance-energy`) is #50. The user approved all the decisions of
+section 5. Section 7 has the changes to this plan during the work.
 
 ## 1. Goal
 
@@ -283,13 +283,16 @@ and D8 have the correction of the user:
 
 1. Get the approval of the user for D3 to D6 and D9. Done (2026-10-04).
 2. Phase 1, its own branch and PR (`fix/acoustic-resonance-values` or
-   similar): D5 in `profile.py`, with tests and `TESTS.md` entries.
+   similar): D5 in `profile.py`, with tests and `TESTS.md` entries. Done
+   (#49).
 3. Phase 2, its own branch and PR (`feature/acoustic-resonance-check`):
    `checks/acoustic.py`, the entry point, the tests of section 4, the
    documentation of section 3.5. The specification is version 1 (the rule of
-   the release candidates). Run `nix develop --command scripts/check`.
+   the release candidates). Run `nix develop --command scripts/check`. Done
+   (#50).
 4. Before the merge of phase 2, move the lasting content of this plan into
    `docs/checks.md` and `docs/usage.md`, and record the results in section 7.
+   Done (#50).
 
 ## 7. Results
 
