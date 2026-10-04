@@ -5,6 +5,22 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 
 ## Unreleased
 
+### Added
+
+- **The analysis `gradient.spectrum`**, from pulseq-analysis `0.1.0rc4` in
+  place of `0.1.0rc3`. `--analysis gradient.spectrum` (or
+  `run_checks(..., analyses=["gradient.spectrum"])`) keeps the spectrum of
+  the gradient waveform of the whole sequence in the matrix and in the JSON
+  result: one `SAMPLES` series `gradient_spectrum`, with `coord_unit` `"Hz"`,
+  the unit `"Hz/m/sqrt(Hz)"` (no gamma), the arrays `value` (the
+  root-sum-of-squares of the axes), `x`, `y` and `z`, and the arguments of
+  the calculation in `meta` (the defaults of pypulseq). It has no parameters,
+  so it needs no binding and takes no value of the target. It uses the
+  rasters `GradientRasterTime` and `BlockDurationRaster`, and it is "not
+  evaluated" when neither the file nor the target gives one of them. scipy
+  is now also a dependency of pulseq-analysis. The format stays 1, and no
+  check changes.
+
 ### Changed
 
 - **pulseq-analysis `0.1.0rc3`** in place of `0.1.0rc2`. A series object of

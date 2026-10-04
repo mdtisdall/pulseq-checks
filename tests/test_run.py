@@ -1070,6 +1070,7 @@ def test_the_registry_error_of_pulseq_analysis_is_a_registry_error_of_the_run(
         "seq.index",
         "gradient.limits",
         "gradient.blocks",
+        "gradient.spectrum",
         "pns.safe.levels",
     }
 

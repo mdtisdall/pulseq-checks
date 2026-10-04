@@ -2149,7 +2149,7 @@ three `FakeAnalysis`: one that gives a list, one that raises and one that has pa
 
 #### `test_the_registry_error_of_pulseq_analysis_is_a_registry_error_of_the_run`
 
-**Checks:** `registry.analyses()` gives the four analyses of pulseq-analysis by ID. A
+**Checks:** `registry.analyses()` gives the five analyses of pulseq-analysis by ID. A
 `RegistryError` of `pulseq_analysis.analyses.registry()` becomes a `RegistryError` of
 `pulseq_checks.registry` (a `CheckRunError`, so exit status 1), with the same message and the
 first error as its cause. `run_checks` raises it.
@@ -2157,7 +2157,7 @@ first error as its cause. `run_checks` raises it.
 **How:** The test lists the IDs. It replaces `pulseq_analysis.analyses.registry` with a function
 that raises, and calls `registry.analyses()` and `run_checks`.
 
-**Assumptions:** The list of the four IDs is that of pulseq-analysis `v0.1.0rc3`: a newer
+**Assumptions:** The list of the five IDs is that of pulseq-analysis `v0.1.0rc4`: a newer
 version of that package with more analyses changes it.
 
 #### `test_check_rules_are_keyed_by_spec_id`
@@ -4308,26 +4308,28 @@ These tests check `bindings.py`: `BINDINGS`, `gamma` and `unavailable`. They bui
 `test_run.py`). The analyses are the installed analyses of pulseq-analysis, or `FakeAnalysis`
 of `test_run.py`.
 
-#### `test_the_bindings_are_those_of_the_four_analyses_of_pulseq_analysis`
+#### `test_each_analysis_of_pulseq_analysis_but_gradient_spectrum_has_a_binding`
 
-**Checks:** `BINDINGS` has one binding for each installed analysis of pulseq-analysis. The
+**Checks:** `BINDINGS` has one binding for each installed analysis of pulseq-analysis except
+`gradient.spectrum`, which has no parameters and so needs no binding. The
 binding of `seq.index` has no input, no model and no argument. The bindings of
 `gradient.limits` and `gradient.blocks` have no input and no model. The binding of
 `pns.safe.levels` has the model `pns.safe` and no input. A `Binding()` gives no argument.
 
-**How:** The test compares the keys of `BINDINGS` with `registry.analyses()`, and the fields of
-each binding with the expected values.
+**How:** The test compares the keys of `BINDINGS` with `registry.analyses()` less
+`gradient.spectrum`, checks that `spec.params` of `gradient.spectrum` is empty, and compares the
+fields of each binding with the expected values.
 
-**Assumptions:** A new analysis in pulseq-analysis needs a new binding or the test fails (the
-test shows it).
+**Assumptions:** A new analysis in pulseq-analysis fails the test (the test shows it): it needs a
+binding if it has parameters, and else an update of the IDs without a binding.
 
 #### `test_each_binding_gives_the_parameters_of_its_analysis`
 
 **Checks:** The keys of the arguments of each binding are the names in `spec.params` of its
 analysis.
 
-**How:** The test calls the function of each binding for a target with the SAFE parameters and
-compares the key sets.
+**How:** The test calls the function of each binding in `BINDINGS` for a target with the SAFE
+parameters and compares the key sets with those of its analysis.
 
 **Assumptions:** None.
 
@@ -4378,8 +4380,9 @@ the label and the hardware.
 
 #### `test_each_analysis_is_available_for_a_target_that_gives_its_values`
 
-**Checks:** `unavailable` gives `[]` for each of the four analyses and a target with the SAFE
-parameters (the rasters of a hand-made context come from the sequence object).
+**Checks:** `unavailable` gives `[]` for each of the five analyses and a target with the SAFE
+parameters (the rasters of a hand-made context come from the sequence object). This includes
+`gradient.spectrum`, which has no binding and no parameters.
 
 **How:** The test calls `unavailable` for each installed analysis.
 
@@ -4388,7 +4391,7 @@ parameters (the rasters of a hand-made context come from the sequence object).
 #### `test_a_target_without_the_model_makes_pns_safe_levels_unavailable`
 
 **Checks:** For a target without `[models.pns.safe]`, `unavailable` gives exactly one reason for
-`pns.safe.levels`, with the analysis ID, the target name and the missing model. The other three
+`pns.safe.levels`, with the analysis ID, the target name and the missing model. The other four
 analyses are available.
 
 **How:** The test compares the list with the expected text.
@@ -4412,8 +4415,9 @@ both inputs.
 **Checks:** A raster with the source "pypulseq default" is a reason for an analysis that has it
 in `spec.rasters`, with the text of the rule of the checks (the file, the raster and the
 `rasters.` path of the target) and the analysis ID. A raster from the file, from the target or
-for a raster that the analysis does not use is not a reason. The gradient analyses and
-`pns.safe.levels` use `GradientRasterTime`; `seq.index` uses no raster.
+for a raster that the analysis does not use is not a reason. `gradient.limits`,
+`gradient.blocks`, `gradient.spectrum` and `pns.safe.levels` use `GradientRasterTime`;
+`seq.index` uses no raster.
 
 **How:** The test makes contexts with a `raster_sources` dict and calls `unavailable` for the
 installed analyses and for a `FakeAnalysis` with the rasters `GradientRasterTime` and
