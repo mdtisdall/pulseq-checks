@@ -35,6 +35,13 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   this version that has a series. The format stays 1, and the version of
   `pns.safe.levels` stays 1. The results of the checks do not change.
 
+- **`acoustic.resonances`** must have a finite frequency and a finite
+  bandwidth above 0 in each pair. A frequency or a bandwidth that is 0, below
+  0, `inf` or `nan` is now a `ProfileError`, from the profile file and from
+  the `.asc` file. Before, the reader accepted these values. An empty list
+  stays valid. The profile format stays 1. This is phase 1 of
+  `docs/plans/acoustic-resonance-check.md` (decision D5).
+
 ## 0.1.0rc3 (2026-10-04)
 
 The third release candidate. The measurement modules are in their own

@@ -197,8 +197,10 @@ not an error (see [2.7](#27-the-rules)).
 ### 2.5 `[acoustic]`
 
 `resonances`: a list of `[frequency, bandwidth]` pairs of the acoustic
-resonances of the gradient system, in Hz. No check of version 1 uses it. It is
-in `TargetProfile.acoustic_resonances`.
+resonances of the gradient system, in Hz. Each frequency and each bandwidth
+is a finite number above 0; another value is an error, also when the `.asc`
+file gives it. An empty list is valid: the target has no resonance. No check
+of version 1 uses it. It is in `TargetProfile.acoustic_resonances`.
 
 ### 2.6 The `.asc` file
 

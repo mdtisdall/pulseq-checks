@@ -3,10 +3,8 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: draft (2026-10-04). The user decided the fail rule, the place of
-the limit and that the limit is for all the bands together (section 5, D1,
-D2, D7 and D8). The other decisions of section 5 are recommendations that
-need the approval of the user.
+Status: approved by the user on 2026-10-04 (all the decisions of section 5).
+Phase 1 (D5) is its own PR. Phase 2 (the check) is not started.
 
 ## 1. Goal
 
@@ -244,7 +242,8 @@ Decided by the user (2026-10-04):
   (`ACOUSTIC_BAND_ENERGY_LIMIT`). It is not a value of the target profile
   and not a check option. Its source is the decision of the user.
 
-Recommendations that need the approval of the user:
+Approved by the user (2026-10-04). D3 to D6 and D9 are as recommended. D7
+and D8 have the correction of the user:
 
 - **D3. The ID.** `acoustic.resonance-energy`. The name says what the check
   measures, and it is different from the value path `acoustic.resonances`.
@@ -279,7 +278,7 @@ Recommendations that need the approval of the user:
 
 ## 6. How to execute this plan
 
-1. Get the approval of the user for D3 to D6 and D9.
+1. Get the approval of the user for D3 to D6 and D9. Done (2026-10-04).
 2. Phase 1, its own branch and PR (`fix/acoustic-resonance-values` or
    similar): D5 in `profile.py`, with tests and `TESTS.md` entries.
 3. Phase 2, its own branch and PR (`feature/acoustic-resonance-check`):

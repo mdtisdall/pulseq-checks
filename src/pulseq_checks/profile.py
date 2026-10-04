@@ -205,6 +205,12 @@ def _read_values(
             for pair in value
         ):
             fail("acoustic.resonances must be a list of [frequency, bandwidth] pairs")
+        for f, bw in value:
+            if not all(math.isfinite(v) and v > 0 for v in (f, bw)):
+                fail(
+                    "acoustic.resonances must have a finite frequency and bandwidth above 0 "
+                    f"in each pair, not [{f!r}, {bw!r}]"
+                )
         values["acoustic.resonances"] = tuple((float(f), float(bw)) for f, bw in value)
 
     model_sections, unused = _split_models(sections.get("models", {}), installed, "", fail)
