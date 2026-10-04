@@ -3,7 +3,28 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
-## Unreleased
+## 0.1.0rc4 (2026-10-04)
+
+The fourth release candidate. The new check `acoustic.resonance-energy`
+compares the gradient spectrum of the sequence with the acoustic resonances
+of the target: it fails when more than 30 % of the energy of the spectrum is
+in the resonance bands, all the bands together. The new analysis
+`gradient.spectrum` keeps that spectrum in the matrix and in the JSON result
+(`--analysis gradient.spectrum`). pulseq-analysis is `0.1.0rc4`. A series of
+an analysis has a coordinate with its own unit, so the JSON result of this
+version and the JSON result of `0.1.0rc3` cannot read each other when they
+have a series (see "Changed"). A resonance pair of a profile that is not
+finite and above 0 is now an error. The tests of the six checks of
+`0.1.0rc3` pass with no change. The plan is
+`docs/plans/acoustic-resonance-check.md`.
+
+The time budget before the tag (`scripts/budget.py`, 10^6 blocks, Apple M1
+Max, with the read of the file, 3.57 s; the profile has the resonances of
+`tests/profiles/prisma.toml`): the fast checks together take 4.27 s
+(budget: 10 s), `acoustic.resonance-energy` takes 16.38 s, and all seven
+checks take 36.88 s (the six checks of `0.1.0rc3` took 24.54 s). With
+`analyses=["pns.safe.levels"]` they take 36.63 s, and the JSON result is
+0.05 MB.
 
 ### Added
 

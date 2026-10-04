@@ -1,6 +1,6 @@
 [project]
 name = "pulseq-checks"
-version = "0.1.0rc3"
+version = "0.1.0rc4"
 description = "Check a Pulseq sequence against the limits of target scanners"
 readme = "README.md"
 license = "MIT"
