@@ -2,7 +2,8 @@
 
 Builds `build_repeating` of `tests/scale_sequences.py` with about 10^6 blocks, writes it
 to a scratch `.seq` file, and runs each installed check alone in a fresh process, with the
-synthetic limits and the SAFE example hardware as the profile. Run it in the devShell:
+synthetic limits, the SAFE example hardware and the acoustic resonances of
+`tests/profiles/prisma.toml` as the profile. Run it in the devShell:
 
     nix develop --command uv run python scripts/budget.py [--blocks N] [--work-dir DIR] \
 [--json OUT]
@@ -62,6 +63,10 @@ GradientRasterTime = 10e-6
 RadiofrequencyRasterTime = 1e-6
 AdcRasterTime = 100e-9
 BlockDurationRaster = 10e-6
+
+# The resonances of tests/profiles/prisma.toml, so that acoustic.resonance-energy is evaluated.
+[acoustic]
+resonances = [[590, 100], [1140, 220]]
 
 # The SAFE parameters of pypulseq's example hardware, not of a real scanner.
 [models.pns.safe]
