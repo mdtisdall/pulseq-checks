@@ -107,3 +107,6 @@ for result in matrix.results:
   findings to another tool, how to write a plugin check (also one that gives
   findings), and how a check uses the measurement modules of pulseq-analysis.
 - [`docs/checks.md`](docs/checks.md): the specification of each check.
+- [`docs/rasters.md`](docs/rasters.md): why the raster and timing checks are
+  stricter than `check_timing` of pypulseq and `checkTiming` of MATLAB Pulseq,
+  and the decisions about rasters.
