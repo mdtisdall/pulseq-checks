@@ -583,6 +583,18 @@ dict, a string) is a `ProfileError` that names the value.
 
 **Assumptions:** None.
 
+#### `test_a_resonance_pair_that_is_not_finite_and_above_0_is_an_error`
+
+**Checks:** A pair of `acoustic.resonances` with a frequency or a bandwidth that is 0, below 0,
+`inf` or `nan` is a `ProfileError` that names `acoustic.resonances`, also when only the second
+pair is not valid.
+
+**How:** The test is parametrized over seven lists (JSON writes `inf` and `nan` as `Infinity`
+and `NaN`, which `json` reads) and calls `read_profile`.
+
+**Assumptions:** The acoustic resonance check (`docs/plans/acoustic-resonance-check.md`,
+decision D5) needs a band with a positive width at a positive frequency.
+
 #### `test_an_empty_acoustic_resonances_list_is_an_empty_tuple`
 
 **Checks:** An empty list of resonances is valid, and it is the empty tuple (not None).
@@ -991,10 +1003,10 @@ the real ones.
 #### `test_a_value_of_the_asc_reader_that_is_not_valid_is_a_profile_error`
 
 **Checks:** A reader result with an unknown `opts` key, a value that has no source, an
-unknown top-level section or a malformed list of resonances is a `ProfileError` that
-names the profile file and the `.asc` file.
+unknown top-level section, a malformed list of resonances or a resonance with a bandwidth of 0
+is a `ProfileError` that names the profile file and the `.asc` file.
 
-**How:** The test is parametrized over four results of a test reader.
+**How:** The test is parametrized over five results of a test reader.
 
 **Assumptions:** The reader of phase 4 makes a valid result. The test checks that
 `read_profile` does not trust a plugin reader.

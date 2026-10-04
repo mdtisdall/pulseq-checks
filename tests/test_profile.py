@@ -413,6 +413,25 @@ def test_malformed_acoustic_resonances_are_an_error(write_json, resonances):
         read_profile(path)
 
 
+@pytest.mark.parametrize(
+    "resonances",
+    [
+        [[0, 100]],
+        [[590, 0]],
+        [[-590, 100]],
+        [[590, -100]],
+        [[math.inf, 100]],
+        [[590, math.nan]],
+        [[590, 100], [1140, 0]],
+    ],
+)
+def test_a_resonance_pair_that_is_not_finite_and_above_0_is_an_error(write_json, resonances):
+    path = write_json({**BASE, "acoustic": {"resonances": resonances}})
+
+    with pytest.raises(ProfileError, match=r"acoustic\.resonances.*above 0"):
+        read_profile(path)
+
+
 def test_an_empty_acoustic_resonances_list_is_an_empty_tuple(write_json):
     profile = read_profile(write_json({**BASE, "acoustic": {"resonances": []}}))
 
@@ -845,6 +864,11 @@ def test_a_reader_error_is_a_profile_error_that_names_the_profile_and_the_asc_fi
         ({"opts": {"max_grad": 1}}, {}, r"opts\.max_grad.*source"),
         ({"vendor_data": {"a": 1}}, {}, "vendor_data"),
         ({"acoustic": {"resonances": 5}}, {"acoustic.resonances": "gpa.asc"}, "resonances"),
+        (
+            {"acoustic": {"resonances": [[590.0, 0.0]]}},
+            {"acoustic.resonances": "gpa.asc"},
+            "above 0",
+        ),
     ],
 )
 def test_a_value_of_the_asc_reader_that_is_not_valid_is_a_profile_error(
