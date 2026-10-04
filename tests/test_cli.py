@@ -500,7 +500,12 @@ def test_end_to_end_with_the_installed_checks_and_the_prisma_profile(seq_file, c
     status = main([str(seq_file), "--target", str(PROFILES / "prisma.toml")])
     out = capsys.readouterr().out
     assert status in (0, 2)
-    for check_id in ("gradient.amplitude.axis", "pns.safe", "timing.rasters"):
+    for check_id in (
+        "acoustic.resonance-energy",
+        "gradient.amplitude.axis",
+        "pns.safe",
+        "timing.rasters",
+    ):
         assert check_id in out
     assert out.rstrip().splitlines()[-1].startswith(f"exit status {status}:")
 
