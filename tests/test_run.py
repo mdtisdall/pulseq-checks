@@ -1,19 +1,28 @@
+import dataclasses
 import importlib.metadata
 from types import SimpleNamespace
 
+import pulseq_analysis.analyses as analysis_module
 import pypulseq as pp
 import pytest
+from pulseq_analysis.analyses import PNS_SAFE_LEVELS, AnalysisSpec
+from pulseq_analysis.pns import pns_levels_for
+from pulseq_analysis.pns_levels import PNS_LIMIT, SAFE_FIELDS
+from pypulseq.utils.safe_pns_prediction import safe_example_hw
 from synthetic import spin_echo_sequence
 
 from pulseq_checks import registry
 from pulseq_checks.profile import HardwareLimits, TargetProfile
 from pulseq_checks.registry import RegistryError
-from pulseq_checks.results import Finding, Location, Result, State
+from pulseq_checks.results import AnalysisState, CheckRunError, Finding, Location, Result, State
 from pulseq_checks.rules import DOCS_URL, CheckPromise, CheckSpec, RunContext, spec_url
 from pulseq_checks.run import RunError, run_checks
+from pulseq_checks.safe_model import hw_from_dict
 
 
-def make_spec(check_id, *, inputs=(), models=(), cost="slow", url=None, rasters=None):
+def make_spec(
+    check_id, *, inputs=(), models=(), cost="slow", url=None, rasters=None, analyses=None
+):
     return CheckSpec(
         id=check_id,
         version=3,
@@ -27,6 +36,7 @@ def make_spec(check_id, *, inputs=(), models=(), cost="slow", url=None, rasters=
         cost=cost,
         url=url,
         **({} if rasters is None else {"rasters": tuple(rasters)}),
+        **({} if analyses is None else {"analyses": tuple(analyses)}),
     )
 
 
@@ -67,9 +77,76 @@ def make_profile(
     )
 
 
+def safe_params(name="MP_GPA_EXAMPLE"):
+    """The parameters of `safe_example_hw()` as the dict of the model `pns.safe`."""
+    hw = safe_example_hw()
+    params = {"name": name}
+    for axis in "xyz":
+        params[axis] = {field: getattr(getattr(hw, axis), field) for field in SAFE_FIELDS}
+    return params
+
+
+def safe_profile(name="a", **kwargs):
+    """A target with the SAFE parameters of `safe_params()` in its model `pns.safe`."""
+    profile = make_profile(name, **kwargs)
+    return dataclasses.replace(
+        profile,
+        models={"pns.safe": safe_params()},
+        sources={**profile.sources, "models.pns.safe": "profile"},
+    )
+
+
 def install(monkeypatch, *rules):
     """Make `registry.check_rules` give `rules`, by ID."""
     monkeypatch.setattr(registry, "check_rules", lambda: {r.spec.id: r for r in rules})
+
+
+class FakeAnalysis:
+    """A test analysis. `compute` keeps `(seq, params)` of each call in `calls`, and gives
+    `value`, or raises `error`. `to_series` gives `series`, or raises `series_error`."""
+
+    def __init__(
+        self,
+        analysis_id,
+        *,
+        params=(),
+        rasters=(),
+        cost="slow",
+        value=None,
+        error=None,
+        series=(),
+        series_error=None,
+    ):
+        self.spec = AnalysisSpec(
+            id=analysis_id,
+            version=2,
+            title=analysis_id,
+            description="a test analysis",
+            params=tuple(params),
+            rasters=tuple(rasters),
+            cost=cost,
+        )
+        self.value = value
+        self.error = error
+        self.series = series
+        self.series_error = series_error
+        self.calls = []
+
+    def compute(self, seq, **params):
+        self.calls.append((seq, params))
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+    def to_series(self, value):
+        if self.series_error is not None:
+            raise self.series_error
+        return self.series
+
+
+def install_analyses(monkeypatch, *analyses):
+    """Make `registry.analyses` give `analyses`, by ID."""
+    monkeypatch.setattr(registry, "analyses", lambda: {a.spec.id: a for a in analyses})
 
 
 def by_key(matrix):
@@ -711,6 +788,304 @@ def test_a_spec_without_rasters_and_the_context_of_a_hand_made_run_work_as_befor
     assert result.state is State.PASS
     ctx = RunContext(spin_echo_sequence(), make_profile())
     assert ctx.raster_sources == {name: "sequence object" for name in RASTERS}
+
+
+def test_a_requested_analysis_gives_its_series_with_no_check(seq_file):
+    profile = safe_profile()
+    matrix = run_checks(seq_file, [profile], select=[], analyses=["pns.safe.levels"])
+    assert matrix.results == ()
+    (result,) = matrix.analyses
+    assert (result.id, result.version, result.target) == ("pns.safe.levels", 1, "a")
+    assert (result.state, result.reason) == (AnalysisState.DONE, None)
+    seq = pp.Sequence(system=profile.make_opts())
+    seq.read(str(seq_file))
+    hardware = (hw_from_dict(safe_params()), "MP_GPA_EXAMPLE")
+    levels = pns_levels_for(seq, hardware=hardware, thresholds=(PNS_LIMIT,))
+    expected = PNS_SAFE_LEVELS.to_series(levels)
+    assert [s.name for s in expected] == ["pns_total", "pns_above_1"]
+    assert result.series == expected
+    assert matrix.analysis("a", "pns.safe.levels") is result
+    assert matrix.exit_status() == 0
+
+
+def test_the_requested_analyses_are_unique_and_sorted_for_each_target(seq_file):
+    matrix = run_checks(
+        seq_file,
+        [safe_profile("y"), safe_profile("x")],
+        select=[],
+        analyses=["seq.index", "gradient.limits", "seq.index"],
+    )
+    assert [(a.target, a.id, a.state) for a in matrix.analyses] == [
+        ("y", "gradient.limits", AnalysisState.DONE),
+        ("y", "seq.index", AnalysisState.DONE),
+        ("x", "gradient.limits", AnalysisState.DONE),
+        ("x", "seq.index", AnalysisState.DONE),
+    ]
+    assert all(a.series == () for a in matrix.analyses)
+    assert run_checks(seq_file, [safe_profile()], select=[]).analyses == ()
+
+
+def test_a_target_without_the_pns_safe_model_gives_not_evaluated_for_the_analysis(
+    monkeypatch, seq_file
+):
+    rule = Rule(make_spec("t.a", analyses=("pns.safe.levels",)))
+    install(monkeypatch, rule)
+    matrix = run_checks(
+        seq_file, [safe_profile("x"), make_profile("y")], analyses=["pns.safe.levels"]
+    )
+    assert rule.spec.analyses == ("pns.safe.levels",)
+    assert make_spec("t.b").analyses == ()
+    x, y = matrix.analyses
+    assert (x.target, x.state, x.reason) == ("x", AnalysisState.DONE, None)
+    assert (y.target, y.state, y.series) == ("y", AnalysisState.NOT_EVALUATED, ())
+    assert (
+        y.reason == "for the analysis pns.safe.levels, the target 'y' does not give: model pns.safe"
+    )
+    # The check that declares the analysis gets the same reason, and run is not called.
+    results = by_key(matrix)
+    assert results["t.a", "x"].state is State.PASS
+    assert results["t.a", "y"].state is State.NOT_EVALUATED
+    assert results["t.a", "y"].reason == y.reason
+    assert len(rule.contexts) == 1
+    assert matrix.exit_status() == 0
+
+
+def test_a_check_that_names_the_model_of_its_analysis_gives_its_own_reason_only(
+    monkeypatch, seq_file
+):
+    """A check whose spec names the model that its analysis needs gives the reason of its
+    own rules only: the reason does not give the model two times."""
+    with_analysis = Rule(make_spec("t.a", models=("pns.safe",), analyses=("pns.safe.levels",)))
+    without = Rule(make_spec("t.b", models=("pns.safe",)))
+    install(monkeypatch, with_analysis, without)
+    matrix = run_checks(seq_file, [make_profile("y")])
+    results = by_key(matrix)
+    assert results["t.a", "y"].state is State.NOT_EVALUATED
+    assert results["t.a", "y"].reason == results["t.b", "y"].reason
+    assert results["t.a", "y"].reason == "the target 'y' does not give: model pns.safe"
+    assert with_analysis.contexts == [] and without.contexts == []
+
+
+def test_a_default_gradient_raster_gives_not_evaluated_for_pns_safe_levels(seq_file):
+    without_definitions(seq_file, "GradientRasterTime")
+    targets = [safe_profile("x"), safe_profile("y", rasters={"GradientRasterTime": 10e-6})]
+    matrix = run_checks(seq_file, targets, select=[], analyses=["pns.safe.levels", "seq.index"])
+    assert [(a.target, a.id, a.state) for a in matrix.analyses] == [
+        ("x", "pns.safe.levels", AnalysisState.NOT_EVALUATED),
+        ("x", "seq.index", AnalysisState.DONE),
+        ("y", "pns.safe.levels", AnalysisState.DONE),
+        ("y", "seq.index", AnalysisState.DONE),
+    ]
+    assert matrix.analyses[0].reason == (
+        "for the analysis pns.safe.levels, the file does not declare GradientRasterTime and "
+        "the target 'x' does not give rasters.GradientRasterTime"
+    )
+    assert matrix.analyses[0].series == ()
+
+
+@pytest.mark.filterwarnings("ignore:.*:UserWarning")
+def test_a_file_without_two_rasters_gives_one_reason_for_a_gradient_analysis(seq_file):
+    without_definitions(seq_file, "GradientRasterTime", "BlockDurationRaster")
+    (result,) = run_checks(
+        seq_file, [safe_profile()], select=[], analyses=["gradient.limits"]
+    ).analyses
+    assert result.state is AnalysisState.NOT_EVALUATED
+    assert result.reason == (
+        "for the analysis gradient.limits, the file does not declare GradientRasterTime and "
+        "BlockDurationRaster and the target 'a' does not give rasters.GradientRasterTime, "
+        "rasters.BlockDurationRaster"
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        ({"error": ValueError("a test failure")}, "ValueError: a test failure"),
+        ({"series_error": KeyError("k")}, "KeyError: 'k'"),
+        ({"series": [1]}, "to_series gave list, not a tuple of Series"),
+        ({"series": ("text",)}, "to_series gave an item of type str, not a Series"),
+    ],
+    ids=["compute raises", "to_series raises", "to_series gives a list", "to_series gives a str"],
+)
+def test_an_analysis_that_fails_gives_error_and_does_not_change_the_exit_status(
+    monkeypatch, fields, reason
+):
+    install_analyses(monkeypatch, FakeAnalysis("t.x", **fields))
+    only = run_checks(spin_echo_sequence(), [make_profile()], select=[], analyses=["t.x"])
+    (result,) = only.analyses
+    assert (result.id, result.version, result.target) == ("t.x", 2, "a")
+    assert (result.state, result.reason, result.series) == (AnalysisState.ERROR, reason, ())
+    assert only.exit_status() == 0
+    # A check with the status 2 keeps it, and the other checks still run.
+    install(
+        monkeypatch,
+        Rule(make_spec("t.a"), lambda ctx: ctx.result(make_spec("t.a"), State.FAIL)),
+        Rule(make_spec("t.b")),
+    )
+    matrix = run_checks(spin_echo_sequence(), [make_profile()], analyses=["t.x"])
+    assert matrix.analyses == only.analyses
+    assert [r.state for r in matrix.results] == [State.FAIL, State.PASS]
+    assert (
+        matrix.exit_status()
+        == 2
+        == run_checks(spin_echo_sequence(), [make_profile()]).exit_status()
+    )
+
+
+def test_a_check_that_declares_an_analysis_whose_compute_raises_gives_error(monkeypatch, seq_file):
+    fake = FakeAnalysis("t.x", error=ValueError("a test failure"))
+    install_analyses(monkeypatch, fake)
+
+    def make_rule(check_id):
+        def run(ctx):
+            ctx.analysis("t.x")
+            return ctx.result(rule.spec, State.PASS)
+
+        rule = Rule(make_spec(check_id, analyses=("t.x",)), run)
+        return rule
+
+    install(monkeypatch, make_rule("t.a"), make_rule("t.b"))
+    matrix = run_checks(seq_file, [make_profile("x"), make_profile("y")], analyses=["t.x"])
+    assert [(r.check_id, r.target, r.state) for r in matrix.results] == [
+        ("t.a", "x", State.ERROR),
+        ("t.b", "x", State.ERROR),
+        ("t.a", "y", State.ERROR),
+        ("t.b", "y", State.ERROR),
+    ]
+    assert {r.reason for r in matrix.results} == {"ValueError: a test failure"}
+    assert [(a.target, a.state, a.reason) for a in matrix.analyses] == [
+        ("x", AnalysisState.ERROR, "ValueError: a test failure"),
+        ("y", AnalysisState.ERROR, "ValueError: a test failure"),
+    ]
+    # compute runs one time for each target, for the two checks and the requested analysis.
+    assert len(fake.calls) == 2
+    assert fake.calls[0][0] is not fake.calls[1][0]
+    assert matrix.exit_status() == 1
+
+
+def test_an_analysis_that_is_not_installed_is_a_run_error_before_the_file_is_read(
+    monkeypatch, tmp_path
+):
+    install(monkeypatch, Rule(make_spec("t.a")))
+    missing = tmp_path / "missing.seq"
+    with pytest.raises(RunError, match="'no.such'") as excinfo:
+        run_checks(missing, [make_profile()], analyses=["seq.index", "no.such"])
+    assert "cannot read" not in str(excinfo.value)
+    # A check that declares such an analysis gives an error, and run is not called.
+    rule = Rule(make_spec("t.b", analyses=("seq.index", "no.such", "no.other")))
+    install(monkeypatch, rule)
+    (result,) = run_checks(spin_echo_sequence(), [make_profile()]).results
+    assert result.state is State.ERROR
+    assert (
+        result.reason == "the check declares analyses that are not installed: 'no.such', 'no.other'"
+    )
+    assert rule.contexts == []
+
+
+def test_fast_only_keeps_a_requested_slow_analysis(monkeypatch):
+    slow = FakeAnalysis("t.slow", cost="slow", value="v")
+    fast = FakeAnalysis("t.fast", cost="fast", value="w")
+    install_analyses(monkeypatch, slow, fast)
+    install(
+        monkeypatch,
+        Rule(make_spec("t.fast-check", cost="fast")),
+        Rule(make_spec("t.slow-check", cost="slow")),
+    )
+    matrix = run_checks(
+        spin_echo_sequence(), [make_profile()], fast_only=True, analyses=["t.slow", "t.fast"]
+    )
+    assert [r.check_id for r in matrix.results] == ["t.fast-check"]
+    assert [(a.id, a.state) for a in matrix.analyses] == [
+        ("t.fast", AnalysisState.DONE),
+        ("t.slow", AnalysisState.DONE),
+    ]
+    assert len(slow.calls) == 1
+
+
+def test_an_analysis_without_a_binding_is_available_only_without_parameters(monkeypatch):
+    plain = FakeAnalysis("t.plain", series=())
+    with_params = FakeAnalysis("t.params", params=("p", "q"))
+    install_analyses(monkeypatch, plain, with_params)
+    matrix = run_checks(
+        spin_echo_sequence(), [make_profile()], select=[], analyses=["t.params", "t.plain"]
+    )
+    params, plain_result = matrix.analyses
+    assert (plain_result.id, plain_result.state, plain_result.reason) == (
+        "t.plain",
+        AnalysisState.DONE,
+        None,
+    )
+    assert [params for _, params in plain.calls] == [{}]
+    assert (params.id, params.state) == ("t.params", AnalysisState.NOT_EVALUATED)
+    assert (
+        params.reason
+        == "for the analysis t.params, pulseq-checks has no binding for its parameters p, q"
+    )
+    assert with_params.calls == []
+
+
+def test_a_context_made_by_hand_loads_the_analyses_on_its_first_call_and_keeps_the_results(
+    monkeypatch,
+):
+    ok = FakeAnalysis("t.ok", value=[1])
+    failing = FakeAnalysis("t.fail", error=ValueError("a test failure"))
+    with_params = FakeAnalysis("t.params", params=("p",))
+    loads = []
+
+    def load():
+        loads.append(1)
+        return {a.spec.id: a for a in (ok, failing, with_params)}
+
+    monkeypatch.setattr(registry, "analyses", load)
+    seq = spin_echo_sequence()
+    ctx = RunContext(seq, make_profile())
+    assert loads == []
+    first = ctx.analysis("t.ok")
+    assert first == [1]
+    assert ctx.analysis("t.ok") is first
+    assert loads == [1]
+    assert ok.calls == [(seq, {})]
+    with pytest.raises(ValueError, match="a test failure") as first_error:
+        ctx.analysis("t.fail")
+    with pytest.raises(ValueError, match="a test failure") as second_error:
+        ctx.analysis("t.fail")
+    assert second_error.value is first_error.value
+    assert len(failing.calls) == 1
+    with pytest.raises(LookupError, match="'no.such' is not installed"):
+        ctx.analysis("no.such")
+    with pytest.raises(LookupError, match="no binding"):
+        ctx.analysis("t.params")
+    assert with_params.calls == []
+    # A context with the analyses does not load them.
+    ctx = RunContext(seq, make_profile(), analyses={"t.ok": ok})
+    assert ctx.analysis("t.ok") == [1]
+    assert loads == [1]
+    assert len(ok.calls) == 2
+
+
+def test_the_registry_error_of_pulseq_analysis_is_a_registry_error_of_the_run(
+    monkeypatch, seq_file
+):
+    assert set(registry.analyses()) == {
+        "seq.index",
+        "gradient.limits",
+        "gradient.blocks",
+        "pns.safe.levels",
+    }
+
+    def broken():
+        raise analysis_module.RegistryError(
+            "the packages 'a' and 'b' both give the analysis ID 'x'"
+        )
+
+    monkeypatch.setattr(analysis_module, "registry", broken)
+    with pytest.raises(RegistryError, match="both give the analysis ID 'x'") as excinfo:
+        registry.analyses()
+    assert isinstance(excinfo.value, CheckRunError)
+    assert isinstance(excinfo.value.__cause__, analysis_module.RegistryError)
+    install(monkeypatch, Rule(make_spec("t.a")))
+    with pytest.raises(RegistryError, match="both give the analysis ID 'x'"):
+        run_checks(seq_file, [make_profile()])
 
 
 class EntryPoint:

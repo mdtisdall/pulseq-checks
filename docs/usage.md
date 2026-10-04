@@ -454,8 +454,8 @@ only for the target `Prisma AS82`.
 
 ```
 pulseq-check SEQ_FILE (--config FILE | --target PROFILE [--target PROFILE ...])
-             [--check ID ...] [--fast] [--json OUT] [--max-findings N]
-             [--show-findings] [--quiet]
+             [--check ID ...] [--analysis ID ...] [--fast] [--json OUT]
+             [--max-findings N] [--show-findings] [--quiet]
 ```
 
 | Argument | Meaning |
@@ -464,6 +464,7 @@ pulseq-check SEQ_FILE (--config FILE | --target PROFILE [--target PROFILE ...])
 | `--config FILE` | A [check configuration](#3-the-check-configuration). Its targets are relative to the file. |
 | `--target PROFILE` | A [target profile](#2-the-target-profile). Repeat it for more targets. |
 | `--check ID` | Select this check, and make it required for each target. Repeat it for more checks. With `--config`, the IDs are added to its `select` (if it has one) and made required for all targets. |
+| `--analysis ID` | Keep the result of this [analysis](#analysisresult-and-analysisstate) of pulseq-analysis for each target, in the [JSON result](#the-key-analyses). Repeat it for more analyses. It also works with `--config`, which has no key for analyses. It does not select or remove a check, and `--fast` does not remove an analysis. An ID that is not installed is an error of the run. The IDs of this package are in [section 7](#the-analyses-of-this-package). |
 | `--fast` | Run only the checks of the cost class `fast`, and the required checks. Selection by cost does not make a check required. The cost class of each check is in [`checks.md`](checks.md). A check that does not declare a class is `slow`. |
 | `--json OUT` | Write the result as [JSON](#6-the-result-json) to the file `OUT`. `-` writes it to the standard output and the summary to the standard error. |
 | `--max-findings N` | Keep only the first `N` findings of each result, in the JSON result and in the summary. `N` must be an integer of 0 or more. The result records the number of the others in `findings_omitted`. Without it, all findings are kept. |
@@ -485,6 +486,9 @@ of a `Sequence` object: only the Python function has `limits_from_sequence`
 When both 1 and 2 apply, the status is 1: the result set is not complete. The
 summary still lists each failure. An error in the arguments is 1, not 2.
 
+An analysis result is not a check result. An analysis that is "not evaluated"
+or that gives an "error" does not change the exit status.
+
 ### The summary
 
 The summary has five parts:
@@ -492,7 +496,10 @@ The summary has five parts:
 1. One line for each check and each target: the state, the check ID, the
    target, the value and the limit with the unit, a short detail (for example
    the axis or the raster), and a mark for a required check.
-2. The "not evaluated" and "error" results, with their reasons.
+2. The "not evaluated" and "error" results, with their reasons. After the
+   checks, one line for each analysis result that is not "done": the state,
+   `analysis`, the analysis ID and the target, then the reason on the lines
+   below.
 3. The findings. This part is there only when a result has findings. It has
    one count line for each result with findings. After `--max-findings`, the
    count line also gives the numbers that the result kept and omitted, for
@@ -555,6 +562,23 @@ evaluated" or "error", a block `not evaluated and errors:` follows the table
 with the reason of each. When a result has findings, a block `findings` follows.
 A block `unused profile sections` lists the sections that no check used.
 
+An analysis result that is "done" is not in the summary: its series are only in
+the JSON result. For example, the same run against a profile with no SAFE
+parameters, with `--analysis pns.safe.levels`, has this block:
+
+```text
+not evaluated and errors:
+  not evaluated: pns.safe, target Prisma AS82
+    the target 'Prisma AS82' does not give: model pns.safe
+  not evaluated: analysis pns.safe.levels, target Prisma AS82
+    for the analysis pns.safe.levels, the target 'Prisma AS82' does not give: model pns.safe
+```
+
+The block also appears when only an analysis is "not evaluated" or gives an
+"error". `--analysis` does not change which checks run. To run an analysis and
+no check, use a [configuration file](#3-the-check-configuration) with
+`select = []`.
+
 ## 5. The Python API
 
 ```python
@@ -577,9 +601,9 @@ raise SystemExit(matrix.exit_status())
 This is what the command does. The package exports `read_profile`,
 `read_check_config`, `run_checks`, `TargetProfile`, `HardwareLimits`,
 `CheckConfig`, `Result`, `ResultMatrix`, `State`, `Location`, `TargetInfo`,
-`Finding`, `CheckSpec`, `CheckRule`, `RunContext` and the errors. The
-measurements that the checks use are in the package pulseq-analysis
-([section 8](#8-the-measurement-modules)).
+`Finding`, `AnalysisResult`, `AnalysisState`, `CheckSpec`, `CheckRule`,
+`RunContext` and the errors. The measurements that the checks use are in the
+package pulseq-analysis ([section 8](#8-the-measurement-modules)).
 
 ### `read_profile(path) -> TargetProfile`
 
@@ -621,6 +645,7 @@ def run_checks(
     required=None,
     fast_only=False,
     limits_from_sequence=False,
+    analyses=(),
 ) -> ResultMatrix: ...
 ```
 
@@ -632,6 +657,7 @@ def run_checks(
 | `required` | A mapping from a check ID to the target names for which it is required, or to `None` for all targets. `None` (the default) means that no check is required. A required check runs whatever `select` and `fast_only` say. |
 | `fast_only` | Run only the checks of the cost class `fast`, and the required checks. It does not make a check required. |
 | `limits_from_sequence` | The opt-in to the limits of the sequence. Only with a `Sequence` object (see below). |
+| `analyses` | The IDs of the analyses of pulseq-analysis whose results the matrix keeps ([`AnalysisResult`](#analysisresult-and-analysisstate)). The default is `()`. |
 
 The results are in the order of the targets, then of the check IDs.
 `run_checks` raises `RunError` for an error of the run: no target, two
@@ -640,6 +666,15 @@ installed check, a target name in `required` that is not a target, a `.seq`
 file that cannot be read, or an argument combination that is not allowed. An
 exception inside a check is not an error of the run: it is the result "error"
 of that check.
+
+**The analyses.** `analyses` is a sequence of IDs. The run makes them unique
+and sorts them. An ID that is not an installed analysis is a `RunError`, and
+`run_checks` raises it before it reads the sequence. For each target, after
+its checks, the run calculates each requested analysis, also when no check uses
+it. `select=[]` runs no check and still runs the analyses. `select`,
+`required` and `fast_only` do not affect them: an analysis is not a check, so
+`fast_only` does not remove a slow analysis. The results are in
+`ResultMatrix.analyses`.
 
 **A path.** `run_checks` reads the file one time for each target, with the
 `Opts` of that target. (A sequence that is read with the `Opts` of one target
@@ -681,10 +716,13 @@ A frozen dataclass:
 | `package_version` | The version of `pulseq-checks` that made the matrix. |
 | `targets` | A tuple of `TargetInfo`: `name`, `sources`, `unused_sections` and `limits_source` (`"profile"` or `"sequence object"`). |
 | `results` | A tuple of `Result`. |
+| `analyses` | A tuple of `AnalysisResult`, in the order of the targets, then of the sorted analysis IDs. It is `()` when the caller asked for no analysis. |
+| `analysis(target, id)` | The `AnalysisResult` of the analysis `id` for the target named `target`, or `None` when the matrix has none. |
 | `exit_status()` | 0, 2 or 1, by the [table above](#exit-status). |
-| `with_max_findings(n)` | A new matrix in which each result with more than `n` findings keeps the first `n`, and its `findings_omitted` has the number of the others added. `n` must be an `int` of 0 or more (not a `bool`), else `ValueError`. |
+| `without_series()` | A new matrix in which each `AnalysisResult` has no series. The other fields are the same. Use it for a small JSON. |
+| `with_max_findings(n)` | A new matrix in which each result with more than `n` findings keeps the first `n`, and its `findings_omitted` has the number of the others added. `n` must be an `int` of 0 or more (not a `bool`), else `ValueError`. It keeps `analyses` as they are. |
 | `to_json()` | The [JSON](#6-the-result-json) text. |
-| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Raises `ValueError` for a format that is newer than this package, and for an unknown or a missing key. |
+| `ResultMatrix.from_json(text)` | The matrix of a text from `to_json`. `from_json(m.to_json()) == m`. Raises `ValueError` for a format that is newer than this package, for an unknown or a missing key (the key `"analyses"` is necessary), and for a series that is not valid. |
 
 ### `Result`
 
@@ -742,6 +780,76 @@ text = small.to_json()  # the findings and findings_omitted go with it
 again = ResultMatrix.from_json(text)
 ```
 
+### `AnalysisResult` and `AnalysisState`
+
+An analysis result is the result of one analysis of pulseq-analysis for one
+target. It is not a check result: `exit_status()` does not use it.
+`AnalysisResult` is a frozen dataclass:
+
+| Field | Meaning |
+|---|---|
+| `id`, `version` | The ID and the `version` of the `AnalysisSpec`, for example `"pns.safe.levels"` and `1`. |
+| `target` | The name of the target. |
+| `state` | An `AnalysisState` (below). |
+| `reason` | Why the state is "not evaluated" or "error", else `None`. |
+| `series` | A tuple of `Series`: the part of the value that can go into JSON (`Analysis.to_series`). It is `()` unless the state is "done". |
+
+`AnalysisState` has three values:
+
+| State | The value | When |
+|---|---|---|
+| done | `AnalysisState.DONE`, `"done"` | The analysis is available for the target, and `compute` and `to_series` returned. `series` can be `()`: `seq.index`, `gradient.limits` and `gradient.blocks` have nothing for JSON, and `pns.safe.levels` has nothing for a sequence with no gradient event. |
+| not evaluated | `AnalysisState.NOT_EVALUATED`, `"not evaluated"` | The analysis is not available for the target. The target does not give a model or an input of the [binding](#the-analyses-of-this-package); or the file does not declare a raster that the analysis uses and the target does not give it; or the analysis has parameters and pulseq-checks has no binding for it. The reason names the analysis and what is missing. |
+| error | `AnalysisState.ERROR`, `"error"` | `compute` or `to_series` raised an exception (the reason is `<exception type>: <message>`, for example `NotImplementedError` for a file with the rotation extension), or `to_series` did not return a tuple of `Series`. The run goes on. |
+
+An analysis result never stops the run and never changes the exit status.
+
+A `Series` is the form of the values of an analysis in a matrix and in the JSON
+result. [The usage document of
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#5-series-values-for-json)
+gives its fields, its four kinds (`SAMPLES`, `ENVELOPE`, `POINTS` and `RUNS`) and
+its arrays. The series of `pns.safe.levels` are in [its section
+6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#6-analyses-the-analyses-and-their-registry).
+
+```python
+from pulseq_checks import read_profile, run_checks
+
+matrix = run_checks(
+    "scan.seq", [read_profile("prisma.toml")], select=[], analyses=["pns.safe.levels"]
+)
+result = matrix.analysis("Prisma AS82", "pns.safe.levels")
+if result.state.value == "done":
+    for series in result.series:
+        print(series.name, series.kind.value, series.unit, list(series.arrays))
+else:
+    print(result.state.value, result.reason)
+
+small = matrix.without_series()  # the states and the reasons, no arrays
+```
+
+**The full value.** The live API gives the series only, not the full Python
+value (for example not `PnsLevels`). To get it, call the analysis again with
+the arguments of its [binding](#the-analyses-of-this-package). For
+`pns.safe.levels`:
+
+```python
+from pulseq_analysis.pns import pns_levels_for
+from pulseq_analysis.pns_levels import PNS_LIMIT
+from pulseq_checks import read_profile
+from pulseq_checks.safe_model import hw_from_dict
+
+target = read_profile("prisma.toml")  # seq is a pp.Sequence
+params = target.models["pns.safe"]
+label = params.get("name") or target.sources["models.pns.safe"]
+levels = pns_levels_for(seq, hardware=(hw_from_dict(params), label), thresholds=(PNS_LIMIT,))
+```
+
+`pns_levels_for` keeps its result for one `Sequence` object, the hardware and
+the thresholds. When you gave `run_checks` a `Sequence` object, `seq` is that
+object and the call gets the kept result. When you gave it a path, the run read
+its own `Sequence` object for each target, so a `seq` of yours is another
+object, and the call runs the SAFE model again.
+
 ### The errors
 
 `CheckRunError` is the base class of each error of the run. Its subclasses:
@@ -761,11 +869,12 @@ The command catches `CheckRunError` and gives exit status 1.
 
 | Key | Meaning |
 |---|---|
-| `format` | `1`. `from_json` refuses a larger number. In the release candidates the format stays 1 when the JSON changes: a reader of `0.1.0rc1` refuses a result of this version, because of the unknown key `findings`. |
+| `format` | `1`. `from_json` refuses a larger number. In the release candidates the format stays 1 when the JSON changes: a reader of `0.1.0rc1` refuses a result of `0.1.0rc2`, because of the unknown key `findings`. A reader of `0.1.0rc2` refuses a result of this version, because of the unknown key `analyses`. |
 | `package_version` | The version of `pulseq-checks`. |
 | `sequence` | The path of the `.seq` file, or `"<Sequence object>"`. |
 | `targets` | One object for each target: `name`, `sources` (each value path, with `"profile"` or the `.asc` file as its source), `unused_sections` and `limits_source`. |
 | `results` | One object for each check and target, with the keys of `Result`. `state` is a string. `location` is `null` or `{"block": ..., "time_s": ...}`. `findings` is a list of finding objects, and `findings_omitted` is an integer of 0 or more. |
+| `analyses` | One object for each analysis result ([`AnalysisResult`](#analysisresult-and-analysisstate)), in the order of the targets, then of the analysis IDs. The key is always there: the list is empty when the caller asked for no analysis. See [the key `analyses`](#the-key-analyses). |
 
 A finding object has the keys `code`, `message`, `location` and `data`, in this
 order. `location` is `null` or `{"block": ..., "time_s": ...}`, and `data` is an
@@ -854,12 +963,107 @@ named as required:
       "findings": [],
       "findings_omitted": 0
     }
-  ]
+  ],
+  "analyses": []
 }
 ```
 
 The exit status of this run is 2: one check failed, and no required check was
 "not evaluated". `pns.safe` is not required.
+
+### The key `analyses`
+
+`"analyses"` comes after `"results"`. It is always written, also when it is an
+empty list, and `from_json` needs it. Thus this version cannot read a JSON
+result of `0.1.0rc2`, and `0.1.0rc2` cannot read a result of this version. The
+format stays 1.
+
+Each item has the keys `id`, `version`, `target`, `state`, `reason` and
+`series`, in this order. `state` is `"done"`, `"not evaluated"` or `"error"`.
+`reason` is `null` for "done". `series` is a list of series objects. It is
+empty unless the state is "done", and also for a "done" analysis that has
+nothing for JSON (`seq.index`, `gradient.limits` and `gradient.blocks`).
+
+A series object has the keys `name`, `kind`, `unit`, `t0_s`, `step_s`, `end_s`,
+`meta` and `arrays`. `kind` is `"samples"`, `"envelope"`, `"points"` or
+`"runs"`. Each item of `arrays` is `{"dtype", "length", "data"}`: the numpy
+dtype name, the number of elements, and the little-endian bytes of the array,
+gzipped and base64-encoded. A float that is not finite in an array is in the bytes, and in
+`meta` or in a time field it is the string `"inf"`, `"-inf"` or `"nan"`.
+[The usage document of
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#5-series-values-for-json)
+gives the form of a series and the encoding of an array, and
+`Series.from_obj` and `decode_array` read them. A tool that is not in Python
+decodes `data` with base64, then gzip, then the little-endian numbers of
+`dtype`.
+
+For example, `pulseq-check scan.seq --target prisma.toml --analysis
+pns.safe.levels --json result.json` has this item (the `data` are
+abbreviated). The series `pns_total` is an `ENVELOPE`: the smallest and the
+greatest SAFE total (1 is the stimulation limit) of each bin of `bin_samples`
+samples. The series `pns_above_1` is `RUNS`: the intervals
+where the total is at or above 1. This sequence has none, so its arrays have
+length 0:
+
+```json
+{
+  "id": "pns.safe.levels",
+  "version": 1,
+  "target": "Prisma AS82",
+  "state": "done",
+  "reason": null,
+  "series": [
+    {
+      "name": "pns_total",
+      "kind": "envelope",
+      "unit": "1",
+      "t0_s": 0.0,
+      "step_s": 0.00615,
+      "end_s": 0.00593,
+      "meta": {
+        "hardware": "pypulseq example hardware (not a real scanner)",
+        "asc_file": null,
+        "dt_s": 1e-05,
+        "bin_samples": 615,
+        "num_samples": 593,
+        "peak": 0.8659592954842638,
+        "peak_time_s": 0.001955,
+        "axis_peaks_x": 0.62481190608934,
+        "axis_peaks_y": 0.86331635876116,
+        "axis_peaks_z": 0.0
+      },
+      "arrays": {
+        "min": {"dtype": "float32", "length": 1, "data": "H4sIAAAAAAAA/2NgYGAA..."},
+        "max": {"dtype": "float32", "length": 1, "data": "H4sIAAAAAAAA/2teH2sP..."}
+      }
+    },
+    {
+      "name": "pns_above_1",
+      "kind": "runs",
+      "unit": "1",
+      "t0_s": 0.0,
+      "step_s": null,
+      "end_s": null,
+      "meta": {"threshold": 1.0},
+      "arrays": {
+        "start_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "end_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "num_samples": {"dtype": "int64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "peak": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "peak_time_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."}
+      }
+    }
+  ]
+}
+```
+
+The arrays can make the JSON large for a long sequence. At the 10 µs raster,
+the envelope of `pns_total` has one bin for each 615 samples (6.15 ms): about
+1.6 MB as float32 for 20 minutes, and about 4.7 MB for one hour, before gzip.
+gzip makes a sequence that repeats one TR much smaller (0.05 MB for the 20
+minutes of the time budget), and base64 adds one third.
+`ResultMatrix.without_series()` (in Python) gives a matrix with the same
+states and reasons and no series, and its JSON is small.
 
 ### Passing the findings to another tool
 
@@ -951,7 +1155,9 @@ points of all installed packages.
 | `pulseq_checks.profile_readers` | A function | A reader that fills a profile from a vendor file. |
 
 Two packages that give one check ID (or one model name, or one reader name)
-are an error of the run (`RegistryError`). It names both packages.
+are an error of the run (`RegistryError`). It names both packages. The analyses
+that a check uses have their own group, `pulseq_analysis.analyses`, in the
+package pulseq-analysis ([section 8](#8-the-measurement-modules)).
 
 ### A check rule
 
@@ -978,6 +1184,7 @@ same.
 | `findings` | A text, or `None` (the default). A check that gives findings documents them here: what one finding is, its codes, its location, the keys of `data` and the order of the findings. A check that gives none leaves it `None`. |
 | `rasters` | A tuple of the raster names that the measurement of the check uses (`"GradientRasterTime"`, `"RadiofrequencyRasterTime"`, `"AdcRasterTime"`, `"BlockDurationRaster"`). The default is `()`. Put it after `findings` when you give the fields by position. |
 | `promise` | A `CheckPromise`, or `None` (the default). It says what the check promises to a user of its result: `on_pass`, what a pass guarantees; `on_fail`, what a fail means; and `not_promised`, what the check does not promise, also with a pass. [`checks.md`](checks.md) shows it first for each check, and each check of this package gives one. Give one for a plugin check too. Put it after `rasters` when you give the fields by position. |
+| `analyses` | A tuple of the IDs of the analyses of pulseq-analysis that the check gets with `ctx.analysis` (`"seq.index"`, `"pns.safe.levels"`). The default is `()`. It is the last field, after `promise`. See [Using an analysis](#using-an-analysis). |
 
 The run function does these steps for each target:
 
@@ -986,7 +1193,12 @@ The run function does these steps for each target:
    is not in the profile, or a raster of `spec.rasters` is neither in the file
    nor in the profile, the result is "not evaluated" **before** `run` is
    called. The reason names what is missing. Thus `run` can use these values
-   without a check.
+   without a check. When all of these are there, the same holds for an
+   analysis of `spec.analyses` that is not available for the target (see
+   [Using an analysis](#using-an-analysis)): the result is "not evaluated"
+   before `run`, and the reason names the analysis. An ID of `spec.analyses`
+   that is not an installed analysis gives the result "error", not "not
+   evaluated", because the installed packages are wrong, not the target.
 3. It calls `rule.run(ctx)`. An exception gives the result "error", with the
    reason `<exception type>: <message>`. A `run` that returns a result for a
    different check or target, or returns something that is not a `Result`, is
@@ -1005,29 +1217,85 @@ The run function does these steps for each target:
 | `ctx.hardware_limits` | The `HardwareLimits` for the gradient checks, or `None`. |
 | `ctx.raster_sources` | A dict from each raster name to where its value comes from: `"file"` (the file declares it), `"target"` (the file does not, and the profile gives it), `"sequence object"` (the sequence is a `Sequence` object) or `"pypulseq default"` (neither gives it). A `RunContext` that you make by hand has `"sequence object"` for all four. |
 | `ctx.has_input(path)` | True when the target gives the value path. |
-| `ctx.measure(name, fn)` | `fn(ctx.sequence)`, calculated one time for each `name` and each target. The other rules of the target get the kept value. |
+| `ctx.analysis(id)` | The value of `compute` of the analysis `id` of pulseq-analysis, with the arguments of its binding. It is calculated one time for each `id` and each target. The other rules of the target get the kept value. |
+| `ctx.measure(name, fn)` | `fn(ctx.sequence)`, calculated one time for each `name` and each target. It is for the measurements of a plugin. |
 | `ctx.result(spec, state, **fields)` | A `Result` with `check_id`, `spec_version`, `target` and `spec_url` set. `fields` are `value`, `limit`, `unit`, `location`, `model`, `model_version`, `reason` and `findings`. Do not set `required`. |
 
-`ctx.measure` makes a measurement once when several checks use it. The first
+### Using an analysis
+
+An *analysis* of pulseq-analysis calculates a value of a sequence, for example
+the block table or the SAFE PNS levels. `ctx.analysis(id)` gives its full
+Python value for the target of the context, and a rule declares the IDs that
+it uses in `CheckSpec.analyses`.
+
+- **One compute for each target.** The first call for an ID calls `compute` of
+  the analysis. Later calls, from this rule or from another rule of the
+  target, get the kept value. If `compute` raises an exception, the context
+  keeps the exception and raises it again for each caller. Thus the rules that
+  share an analysis get the same error, and `compute` runs one time.
+- **The arguments come from the target.** An analysis has parameters
+  (`AnalysisSpec.params`), for example `gamma`. pulseq-checks gives their
+  values from the target with a *binding* (the table below). `ctx.analysis`
+  calls `compute(ctx.sequence, **arguments)`.
+- **`LookupError`.** `ctx.analysis(id)` raises `LookupError`, with the reason,
+  when the analysis is not installed or is not available for the target. A
+  rule that declares the analysis in `CheckSpec.analyses` never gets this
+  error, because the run function gives "not evaluated" first. A rule that
+  does not declare it gets the result "error".
+- **Not available.** An analysis is not available for a target when: the
+  target does not give an input or a model of its binding; or the file does
+  not declare a raster of `AnalysisSpec.rasters` and the target does not give
+  it; or the analysis has parameters and has no binding in this package (see
+  below).
+- **The series.** The caller of `run_checks` can also keep the result of an
+  analysis in the matrix (`run_checks(..., analyses=...)`, see
+  [section 5](#analysisresult-and-analysisstate)). The run function takes the
+  value from the same context, so a rule and a requested analysis share one
+  compute.
+
+[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#6-analyses-the-analyses-and-their-registry)
+gives the registry of analyses, and the fields of each value are in [its
+sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#1-seq_index-the-block-table).
+
+### The analyses of this package
+
+The bindings of version 1 are in `pulseq_checks.bindings.BINDINGS`:
+
+| Analysis | Value | Inputs and models | Arguments of `compute` |
+|---|---|---|---|
+| `seq.index` | The block table of the sequence (`sequence_index`) | None | None |
+| `gradient.limits` | The peaks over the whole file (`gradient_limits`) | None | `gamma`: the gamma of the target |
+| `gradient.blocks` | The gradient values of each block (`block_gradient_values`) | None | `gamma`: the gamma of the target |
+| `pns.safe.levels` | The SAFE PNS levels (`pns_levels_for`) | Model `pns.safe` | `hardware=(hw_from_dict(params), label)` and `thresholds=(PNS_LIMIT,)` |
+
+- The gamma of the target is the gamma of its `Opts` (`TargetProfile.make_opts()`),
+  so that the value and the limit of a gradient check are in the same units.
+  For a `Sequence` object with `limits_source` `"sequence object"` it is
+  `seq.system.gamma`.
+- `params` is `ctx.profile.models["pns.safe"]` and `hw_from_dict` is in
+  `pulseq_checks.safe_model`. `label` is `params.get("name")`, or the source
+  of the model if it has no name. `PNS_LIMIT` is in `pulseq_analysis.pns_levels`.
+  The analysis also uses the rasters `GradientRasterTime` and
+  `BlockDurationRaster`.
+- An analysis that has no binding here (for example the analysis of another
+  package) is available only when it has no parameters. Then `compute` gets
+  no argument. With parameters it is not available, with the reason that
+  pulseq-checks has no binding for it: the default values of the plugin could
+  be values that are not of the target. A binding for a plugin analysis is a
+  later change (see [section 9](#9-limits-of-version-1)).
+
+The checks of this package that measure the sequence use these analyses, and
+their `CheckSpec.analyses` lists them. The "Analyses" line of each check in
+[`checks.md`](checks.md) shows them.
+
+`ctx.measure` makes a measurement once when several rules use it. It is for the
+measurements of a plugin: a rule that has its own function of the sequence
+gives it a name of its own (for example `"site.block-duration"`). The first
 call for a name calculates. Later calls with that name return the kept value
-and do not call their `fn`. The names of version 1 are below.
-[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md)
-gives the fields of each value.
-
-| Name | The value | The function |
-|---|---|---|
-| `"index"` | The block table of the sequence | `pulseq_analysis.seq_index.sequence_index` |
-| `"gradient_limits"` | The peaks over the whole file | `pulseq_analysis.grad_limits.gradient_limits(seq, gamma=...)` |
-| `"gradient_blocks"` | The gradient values of each block | `pulseq_analysis.grad_limits.block_gradient_values(seq, gamma=...)` |
-| `"pns_levels"` | The SAFE PNS levels | `pulseq_analysis.pns.pns_levels_for(seq, hardware=(hw, label))` |
-
-Use a name only with the function in this table, and with the arguments of
-the checks of this package: the gamma of the target for `"gradient_limits"`
-and for `"gradient_blocks"`, and the hardware of the target for
-`"pns_levels"` ([section 8.1](#81-the-pns-of-a-target-in-a-plugin) shows that
-call). A plugin that uses the name `"index"` with a different function gets
-the value of whichever check called first. Give your own measurement a name
-of your own (for example `"site.block-duration"`).
+and do not call their `fn`. The checks of this package do not use
+`ctx.measure`. Use `ctx.analysis` for an analysis of pulseq-analysis, so that
+your rule shares the compute with the checks of this package and with
+`run_checks(..., analyses=...)`.
 
 An example: a check of a fixed limit on the duration of a block. The limit is
 a part of the specification, so `inputs` is empty. The result gives the
@@ -1037,7 +1305,6 @@ longest block, and one finding for each block that is too long.
 import numpy as np
 
 from pulseq_checks import CheckPromise, CheckSpec, Finding, Location, Result, RunContext, State
-from pulseq_analysis.seq_index import sequence_index
 
 MAX_BLOCK_S = 0.1
 
@@ -1065,10 +1332,11 @@ class _BlockDuration:
             on_fail="At least one block lasts more than 0.1 s. The findings give each one.",
             not_promised="Anything about the events in the blocks.",
         ),
+        analyses=("seq.index",),
     )
 
     def run(self, ctx: RunContext) -> Result:
-        index = ctx.measure("index", sequence_index)
+        index = ctx.analysis("seq.index")
         if index.num_blocks == 0:
             return ctx.result(self.spec, State.PASS, value=0.0, limit=MAX_BLOCK_S, unit="s")
         findings = []
@@ -1134,7 +1402,8 @@ findings:
 
 To test a rule alone, make `RunContext(sequence, profile)` and call
 `rule.run(ctx)`. The run function gives the "not evaluated" and "error"
-results, not the rule.
+results, not the rule. `ctx.analysis` loads the installed analyses in its
+first call.
 
 ### A model
 
@@ -1162,9 +1431,10 @@ reader.
 ## 8. The measurement modules
 
 The checks of this package measure a sequence with the modules of the package
-pulseq-analysis. It is a dependency of pulseq-checks. A plugin can use its
-modules too ([section 7](#7-writing-a-plugin)), and pulseq-reports uses them
-for its plots. The [usage document of
+pulseq-analysis. It is a dependency of pulseq-checks. A check gets a value
+through an analysis of pulseq-analysis (`ctx.analysis`, [section
+7](#using-an-analysis)). A plugin can use the modules too, and pulseq-reports
+uses them for its plots. The [usage document of
 pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md)
 gives the interface of the modules: the names, the fields of each value, the
 units and the rules for the times and the block IDs.
@@ -1178,13 +1448,15 @@ These rules are about the checks:
   result "error".
 - **Rasters.** The gradient and PNS measurements use the `GradientRasterTime`
   and the `BlockDurationRaster` of the sequence. A check that uses them lists
-  both in `CheckSpec.rasters`, as the checks of this package do. Then the run
-  function gives "not evaluated" when neither the file nor the target gives a
-  raster.
-- **Gamma.** The measurements have a default gamma. A check passes the gamma
-  of its target instead.
-- **Hardware.** A check passes the SAFE hardware of its target to
-  `pns_levels_for`. It never uses the example hardware of pypulseq.
+  both in `CheckSpec.rasters`, as the checks of this package do. The analyses
+  `gradient.limits`, `gradient.blocks` and `pns.safe.levels` also use them.
+  Then the run function gives "not evaluated" when neither the file nor the
+  target gives a raster.
+- **Gamma.** The measurements have a default gamma. The binding of an analysis
+  passes the gamma of the target instead.
+- **Hardware.** The binding of `pns.safe.levels` passes the SAFE hardware of
+  the target to `pns_levels_for`. It never uses the example hardware of
+  pypulseq.
 
 ### 8.1 The PNS of a target in a plugin
 
@@ -1193,23 +1465,45 @@ These rules are about the checks:
 argument of `pns_levels_for`. `SAFE_MODEL` is the model `pns.safe` of the
 target profile ([section 2.4](#24-modelspnssafe)).
 
-To use the PNS of a target in a plugin, make the same call as `pns.safe`. Then
-the plugin and `pns.safe` share one run of the model. The spec of the plugin
-lists `"pns.safe"` in `models`. The intervals at or above the limit are
-`levels.above[PNS_LIMIT]`, with `PNS_LIMIT` from
+To use the PNS of a target in a plugin, ask for the analysis `pns.safe.levels`,
+as `pns.safe` does. The binding gives the hardware of the target, so the plugin
+and `pns.safe` share one run of the SAFE model. The spec of the plugin lists
+`"pns.safe"` in `models` and `"pns.safe.levels"` in `analyses`. The intervals
+at or above the limit are `levels.above[PNS_LIMIT]`, with `PNS_LIMIT` from
 `pulseq_analysis.pns_levels`:
 
 ```python
-from pulseq_analysis.pns import pns_levels_for
-from pulseq_checks.safe_model import hw_from_dict
+from pulseq_analysis.pns_levels import PNS_LIMIT
+
+from pulseq_checks import CheckSpec, Result, RunContext, State
 
 
-def target_pns(ctx):
-    params = ctx.profile.models["pns.safe"]
-    hw = hw_from_dict(params)
-    label = params.get("name") or ctx.profile.sources["models.pns.safe"]
-    return ctx.measure("pns_levels", lambda seq: pns_levels_for(seq, hardware=(hw, label)))
+class _PnsIntervals:
+    spec = CheckSpec(
+        id="site.pns-intervals",
+        version=1,
+        title="Intervals of the SAFE PNS at the limit",
+        quantity="The number of intervals where the SAFE total is at or above 100 %.",
+        inputs=(),
+        models=("pns.safe",),
+        limit="0 intervals. The limit is fixed by this check.",
+        tolerance="None.",
+        pass_condition="Pass when no interval is at or above the limit.",
+        analyses=("pns.safe.levels",),
+    )
+
+    def run(self, ctx: RunContext) -> Result:
+        levels = ctx.analysis("pns.safe.levels")
+        count = len(levels.above[PNS_LIMIT])
+        state = State.PASS if count == 0 else State.FAIL
+        return ctx.result(self.spec, state, value=float(count), limit=0.0)
 ```
+
+The binding calls `pns_levels_for` with `hardware=(hw_from_dict(params), label)`
+and `thresholds=(PNS_LIMIT,)`, where `params` is the model `pns.safe` of the
+target. A rule that calls `pns_levels_for` itself with other hardware or other
+thresholds does not share the run. To make the same call in your own code, see
+[the full value](#analysisresult-and-analysisstate).
 
 ## 9. Limits of version 1
 
@@ -1227,6 +1521,10 @@ def target_pns(ctx):
   `timing.pypulseq` with the rasters of the target, and the gradient checks and
   `pns.safe` with the rasters of the file. [`rasters.md`](rasters.md) explains
   why.
+- **Bindings of the analyses of a plugin.** A plugin check can use an
+  analysis of another package through `ctx.analysis`, but only when the
+  analysis has no parameters. pulseq-checks has bindings only for the four
+  analyses of pulseq-analysis ([section 7](#the-analyses-of-this-package)).
 - **No default limits, and no limits of the sequence in the command.** Only
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.

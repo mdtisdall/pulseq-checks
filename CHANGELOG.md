@@ -14,9 +14,55 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
   field of `CheckSpec`, with the default `None`, so a plugin that gives the
   fields by position works as before. The rules of the checks do not change,
   and each specification stays version 1.
+- **The analysis results**: a run can keep the result of an analysis of
+  pulseq-analysis for each target, with its series. `run_checks(...,
+  analyses=[...])` takes the analysis IDs (made unique and sorted; an ID that is
+  not installed is a `RunError` before the file is read). The run calculates
+  each analysis for each target, also with `select=[]`, and `fast_only` does not
+  remove it. `ResultMatrix.analyses` is a tuple of the new `AnalysisResult`
+  (`id`, `version`, `target`, `state`, `reason`, `series`), the new
+  `AnalysisState` is `done`, `not evaluated` or `error`,
+  `ResultMatrix.analysis(target, id)` gives one result, and
+  `ResultMatrix.without_series()` gives a matrix with no series, for a small
+  JSON. `AnalysisResult` and `AnalysisState` are exported
+  from `pulseq_checks`. An analysis result is not a check result: it does not
+  change the exit status. The matrix keeps the series only, not the full value
+  (for example not `PnsLevels`): `docs/usage.md` shows the call that gives it.
+- **`--analysis ID`** of `pulseq-check` (it can be repeated, also with
+  `--config`). It changes the JSON result. The summary lists an
+  analysis result that is not "done", with its reason, in "not evaluated and
+  errors".
+- **`CheckSpec.analyses`**: the IDs of the analyses that a check uses. It is the
+  last field of `CheckSpec`, after `promise`, so that a plugin that gives the
+  earlier fields by position keeps working. The run function gives "not
+  evaluated" before `run` when one of them is not available for the target (the
+  binding needs an input or a model that the target does not give, or the
+  analysis uses a raster that neither the file nor the target gives), and
+  "error" when it is not installed.
+- **`RunContext.analysis(id)`**: the value of `compute` of an analysis for the
+  target, calculated one time for each target (the value, or the exception, is
+  kept). It raises `LookupError` when the analysis is not installed or is not
+  available for the target. The arguments of `compute` come from
+  `pulseq_checks.bindings`.
+- **`scripts/budget.py`** has the mode `@analysis` (all the checks, with
+  `analyses=["pns.safe.levels"]`), and each run of the checks also gives the
+  size of the JSON result and the time of `to_json`.
 
 ### Changed
 
+- **The JSON key `"analyses"`** comes after `"results"`. `to_json` always writes
+  it (an empty list when the caller asked for no analysis), and `from_json`
+  needs it. Thus this version cannot read a JSON result of `0.1.0rc2`, and
+  `0.1.0rc2` cannot read a JSON result of this version. The format stays 1.
+- **The checks of this package use `ctx.analysis`** in place of `ctx.measure`
+  (`seq.index`, `gradient.limits`, `gradient.blocks` and `pns.safe.levels`).
+  Each check lists its analyses in `CheckSpec.analyses`, and `docs/checks.md`
+  has an "Analyses" line for each check. The results of the checks, their
+  specifications and their versions do not change.
+- **`ctx.measure`** is for the measurements of a plugin. The names `"index"`,
+  `"gradient_limits"`, `"gradient_blocks"` and `"pns_levels"` are no longer
+  used by this package: a plugin that used them to share a value with a check
+  uses `ctx.analysis` with the analysis ID.
 - **The measurement modules moved to the package pulseq-analysis**
   (`0.1.0rc2`), a dependency of pulseq-checks. `pulseq_checks` does not
   re-export them, so the old import paths stop working. The new paths are:

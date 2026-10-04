@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pypulseq as pp
 import pytest
+from pulseq_analysis.analyses import GRADIENT_BLOCKS, GRADIENT_LIMITS
 from pulseq_analysis.grad_limits import AxisResult, GradientLimits
 from pulseq_analysis.seq_utils import GAMMA
 from pypulseq.event_lib import EventLibrary
@@ -112,16 +113,16 @@ def install(monkeypatch, *rules):
 
 
 def spy_on_gradient_limits(monkeypatch) -> list[dict]:
-    """Replace `gradient_limits` in the check module with a function that calls the real one
-    and keeps the keyword arguments of each call; returns that list."""
+    """Replace `compute` of the analysis `gradient.limits` with a function that calls the real
+    one and keeps the keyword arguments of each call; returns that list."""
     calls: list[dict] = []
-    real = gradient_module.gradient_limits
+    real = GRADIENT_LIMITS.compute
 
     def spy(seq, **kwargs):
         calls.append(kwargs)
         return real(seq, **kwargs)
 
-    monkeypatch.setattr(gradient_module, "gradient_limits", spy)
+    monkeypatch.setattr(GRADIENT_LIMITS, "compute", spy)
     return calls
 
 
@@ -348,7 +349,7 @@ def test_a_value_with_no_block_has_a_location_with_the_time_only(monkeypatch, ch
         vector_peak_time_s=0.25,
         vector_peak_block=None,
     )
-    monkeypatch.setattr(gradient_module, "gradient_limits", lambda seq, **kwargs: measured)
+    monkeypatch.setattr(GRADIENT_LIMITS, "compute", lambda seq, **kwargs: measured)
 
     result = run_one(check, peak_sequence(), make_profile(max_grad=20.0, max_slew=200.0))
 
@@ -735,16 +736,16 @@ def findings_profile(key: str, limit: float, **opts) -> TargetProfile:
 
 
 def spy_on_block_gradient_values(monkeypatch) -> list[dict]:
-    """Replace `block_gradient_values` in the check module with a function that calls the real
+    """Replace `compute` of the analysis `gradient.blocks` with a function that calls the real
     one and keeps the keyword arguments of each call; returns that list."""
     calls: list[dict] = []
-    real = gradient_module.block_gradient_values
+    real = GRADIENT_BLOCKS.compute
 
     def spy(seq, **kwargs):
         calls.append(kwargs)
         return real(seq, **kwargs)
 
-    monkeypatch.setattr(gradient_module, "block_gradient_values", spy)
+    monkeypatch.setattr(GRADIENT_BLOCKS, "compute", spy)
     return calls
 
 
@@ -761,8 +762,8 @@ def test_a_pass_has_no_findings_and_does_not_measure_the_blocks(
     assert result.state is State.PASS
     assert result.findings == ()
     assert calls == []
-    assert "gradient_limits" in ctx._measurements
-    assert "gradient_blocks" not in ctx._measurements
+    assert "gradient.limits" in ctx._analyses
+    assert "gradient.blocks" not in ctx._analyses
 
 
 @pytest.mark.parametrize(("check", "key", "limit", "unit"), FINDINGS_CASES, ids=FINDINGS_IDS)

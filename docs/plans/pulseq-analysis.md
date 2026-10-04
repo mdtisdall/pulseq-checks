@@ -3,8 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved, not started. Written on 2026-10-01. The user approved the
-answer of each decision of section 6 on the same day.
+Status: approved. Phases 1 to 4 are done; the release 0.1.0rc3 is next. Written
+on 2026-10-01. The user approved the answer of each decision of section 6 on
+the same day.
 
 ## 1. Goal
 
@@ -531,4 +532,42 @@ Checks:
 
 ## 9. Measurements and changes during the work
 
-None yet.
+### 9.1 Changes during the work
+
+The implementation plan of phases 2 and 4
+(`docs/plans/pulseq-analysis-implementation.md`) records the decisions of
+the user. Two of them change this design:
+
+- Phase 2 pins `v0.1.0rc2`, not `v0.1.0rc1` (P2). Thus phase 2 also moved
+  `HardwareLimits` to `profile.py` and used `above[PNS_LIMIT]`.
+- The bindings `gradient.limits` and `gradient.blocks` use the gamma that
+  converted the limits of the target (`bindings.gamma`, the `_gamma` of
+  `checks/gradient.py` before), not `seq.system.gamma` (P3). Section 4.5
+  says "as now", and this is the behavior of before.
+
+Also: `_run_rule` adds the reasons of the analyses of a check only when the
+inputs, the models and the rasters of the check itself are there. Thus the
+reason of `pns.safe` and of the gradient checks does not name a model or a
+raster two times, and it does not change.
+
+### 9.2 The analysis results (task 4.4)
+
+`scripts/budget.py` (10⁶ blocks, `build_repeating(200000)`), on 2026-10-01,
+on the branch `feature/analysis-results`. Apple M1 Max, macOS 26.6.2,
+Python 3.12.14, pypulseq 1.5.0.post1 (the fork pin), pulseq-analysis
+0.1.0rc2. Each time includes the one read of the file (3.72 s).
+
+| Run | Time | Peak RSS | JSON result | `to_json` |
+|---|---|---|---|---|
+| All checks together | 24.54 s | 743 MB | 0.004 MB | 0.00 s |
+| All checks, `analyses=["pns.safe.levels"]` | 24.41 s | 743 MB | 0.050 MB | 0.01 s |
+| `fast_only=True` | 4.28 s | 738 MB | 0.003 MB | 0.00 s |
+
+- The analysis adds no time that the measurement can see: `pns.safe` already
+  runs SAFE, and `to_series` and the JSON take less than 0.1 s. The limit
+  of task 4.4 (10 %) is not reached.
+- The sequence has 1.198 × 10⁸ samples, so the envelope has 194797 bins of
+  615 samples: 1.56 MB as float32 before gzip. This sequence repeats one TR,
+  so gzip makes it 0.05 MB. A sequence that does not repeat compresses less:
+  the upper bound is about 4/3 of the raw size (base64), for example about
+  2.1 MB for this length and about 6 MB for one hour at the 10 µs raster.

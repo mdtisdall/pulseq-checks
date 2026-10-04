@@ -13,6 +13,11 @@ read alone, in its own process, so that a reader can subtract it. The build and 
 of the sequence are timed and printed, but they are not part of the budget. A child stops
 at 5 minutes or at 8 GB of RSS. The script is also the child: `_one MODE SEQ PROFILE`
 (a hidden sub-command) prints one JSON line.
+
+The mode "@analysis" runs all the checks and keeps the analysis `pns.safe.levels` in the
+result (`analyses=["pns.safe.levels"]`). For each run of the checks, the record also gives
+the size of `ResultMatrix.to_json()` in UTF-8 bytes and the time of `to_json`, which is not
+part of the time of the run.
 """
 
 import argparse
@@ -35,6 +40,7 @@ RSS_LIMIT_BYTES = 8 * 1024**3
 POLL_S = 1.0
 ALL = "@all"  # the mode of the child that runs all checks together
 FAST = "@fast"  # the mode of the child that runs with `fast_only=True`
+ANALYSIS = "@analysis"  # the mode of the child that runs all checks and keeps pns.safe.levels
 READ = "@read"  # the mode of the child that only reads the file
 
 # The synthetic limits of `tests/synthetic.SYSTEM` and the four pypulseq default rasters.
@@ -83,7 +89,8 @@ def peak_rss_bytes() -> int:
 
 
 def child_main(mode: str, seq_path: str, profile_path: str) -> None:
-    """Run one mode, and print one JSON line: the mode, the state, the time, the peak RSS."""
+    """Run one mode, and print one JSON line: the mode, the state, the time, the peak RSS,
+    and for a run of the checks the size and the time of the JSON result."""
     import pypulseq as pp
 
     from pulseq_checks.profile import read_profile
@@ -94,15 +101,33 @@ def child_main(mode: str, seq_path: str, profile_path: str) -> None:
         pp.Sequence().read(seq_path)
         seconds = time.perf_counter() - start
         state = "read"
+        json_record = {}
     else:
         profile = read_profile(profile_path)
-        kwargs = {"fast_only": True} if mode == FAST else {} if mode == ALL else {"select": [mode]}
+        kwargs = {
+            FAST: {"fast_only": True},
+            ALL: {},
+            ANALYSIS: {"analyses": ["pns.safe.levels"]},
+        }.get(mode, {"select": [mode]})
         start = time.perf_counter()
         matrix = run_checks(seq_path, [profile], **kwargs)
         seconds = time.perf_counter() - start
         states = sorted({r.state.value for r in matrix.results})
+        states += sorted({f"analysis {a.state.value}" for a in matrix.analyses})
         state = "+".join(states) if states else "no check ran"
-    record = {"check": mode, "state": state, "seconds": seconds, "peak_rss_bytes": peak_rss_bytes()}
+        start = time.perf_counter()
+        text = matrix.to_json()
+        json_record = {
+            "json_seconds": time.perf_counter() - start,
+            "json_bytes": len(text.encode("utf-8")),
+        }
+    record = {
+        "check": mode,
+        "state": state,
+        "seconds": seconds,
+        "peak_rss_bytes": peak_rss_bytes(),
+        **json_record,
+    }
     print(json.dumps(record))
 
 
@@ -173,20 +198,31 @@ def machine() -> dict:
 
 
 def label(record: dict) -> str:
-    return {ALL: "all checks together", FAST: "fast_only=True", READ: "read only"}.get(
-        record["check"], record["check"]
-    )
+    return {
+        ALL: "all checks together",
+        ANALYSIS: "all checks, pns.safe.levels kept",
+        FAST: "fast_only=True",
+        READ: "read only",
+    }.get(record["check"], record["check"])
 
 
 def table(records: list[dict]) -> str:
     width = max(len(label(r)) for r in records)
-    lines = [f"{'check':<{width}}  {'time (s)':>9}  {'peak RSS (MB)':>13}  state"]
+    header = (
+        f"{'check':<{width}}  {'time (s)':>9}  {'peak RSS (MB)':>13}  {'JSON (MB)':>9}  "
+        f"{'JSON (s)':>8}  state"
+    )
+    lines = [header]
     for r in records:
         rss = f"{r['peak_rss_bytes'] / 1e6:13.0f}"
+        size = f"{r['json_bytes'] / 1e6:9.3f}" if "json_bytes" in r else f"{'-':>9}"
+        json_s = f"{r['json_seconds']:8.2f}" if "json_seconds" in r else f"{'-':>8}"
         if r.get("stopped"):
-            lines.append(f"{label(r):<{width}}  {'-':>9}  {rss}  {r['stopped']}")
+            lines.append(f"{label(r):<{width}}  {'-':>9}  {rss}  {size}  {json_s}  {r['stopped']}")
         else:
-            lines.append(f"{label(r):<{width}}  {r['seconds']:9.2f}  {rss}  {r['state']}")
+            lines.append(
+                f"{label(r):<{width}}  {r['seconds']:9.2f}  {rss}  {size}  {json_s}  {r['state']}"
+            )
     return "\n".join(lines)
 
 
@@ -223,7 +259,7 @@ def main() -> None:
         profile_path.write_text(profile_text())
         print(f"build {build_s:.1f} s, write {write_s:.1f} s (not part of the budget)")
 
-        modes = [READ, *sorted(registry.check_rules()), ALL, FAST]
+        modes = [READ, *sorted(registry.check_rules()), ALL, ANALYSIS, FAST]
         records = []
         for mode in modes:
             print(f"running {mode}", file=sys.stderr)
@@ -235,7 +271,8 @@ def main() -> None:
         print(
             "\nEach time includes the one read of the .seq file (see 'read only'). "
             "'fast_only=True' runs the checks of the cost class 'fast'; the budget of "
-            "decision 7 is for them together."
+            "decision 7 is for them together. 'JSON' is the size and the time of "
+            "ResultMatrix.to_json(), which is not part of the time of the run."
         )
         if args.json:
             report = {

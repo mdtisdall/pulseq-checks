@@ -1,15 +1,19 @@
 """Tests for `pulseq_checks.results`: `Finding`, the exit status and the JSON form of a result
-matrix, and `ResultMatrix.with_max_findings`."""
+matrix, `ResultMatrix.with_max_findings`, and the analysis results of a matrix."""
 
 from __future__ import annotations
 
 import json
 import math
 
+import numpy as np
 import pytest
+from pulseq_analysis.series import Series, SeriesKind
 
 from pulseq_checks.results import (
     FORMAT,
+    AnalysisResult,
+    AnalysisState,
     Finding,
     Location,
     Result,
@@ -223,7 +227,14 @@ def test_json_round_trip_keeps_floats_exactly():
 
 def test_json_has_the_keys_of_decision_9():
     obj = json.loads(_full_matrix().to_json())
-    assert list(obj) == ["format", "package_version", "sequence", "targets", "results"]
+    assert list(obj) == [
+        "format",
+        "package_version",
+        "sequence",
+        "targets",
+        "results",
+        "analyses",
+    ]
     assert obj["format"] == 1 == FORMAT
     assert list(obj["targets"][0]) == ["name", "sources", "unused_sections", "limits_source"]
     assert obj["targets"][0]["sources"]["models.pns.safe"] == "MP_GPA.asc (fast)"
@@ -330,9 +341,9 @@ def test_from_json_rejects_a_missing_format():
         ResultMatrix.from_json(json.dumps(obj))
 
 
-def _set(path, value):
-    """The JSON text of the full matrix with `value` at `path` (keys and list indexes)."""
-    obj = json.loads(_full_matrix().to_json())
+def _set(path, value, make=_full_matrix):
+    """The JSON text of the matrix of `make` with `value` at `path` (keys and list indexes)."""
+    obj = json.loads(make().to_json())
     node = obj
     for key in path[:-1]:
         node = node[key]
@@ -569,3 +580,221 @@ def test_with_max_findings_survives_a_json_round_trip():
 def test_with_max_findings_rejects_a_bad_n(bad):
     with pytest.raises(ValueError, match="maximum number of findings"):
         _matrix_with_counts(2).with_max_findings(bad)
+
+
+def _series_pair() -> tuple[Series, ...]:
+    """An envelope series with float32 arrays, and a runs series, both with a meta value that
+    is not finite."""
+    envelope = Series(
+        name="level",
+        kind=SeriesKind.ENVELOPE,
+        unit="1",
+        arrays={
+            "min": np.array([0.0, 0.25, -np.inf], dtype=np.float32),
+            "max": np.array([0.5, np.nan, 1.5], dtype=np.float32),
+        },
+        step_s=1e-3,
+        end_s=2.5e-3,
+        meta={"peak": math.inf, "low": -math.inf, "unknown": math.nan, "name": "x", "n": 3},
+    )
+    runs = Series(
+        name="above",
+        kind=SeriesKind.RUNS,
+        unit="1",
+        arrays={
+            "start_s": np.array([0.1 + 0.2], dtype=np.float64),
+            "end_s": np.array([0.5], dtype=np.float64),
+            "num_samples": np.array([7], dtype=np.int64),
+        },
+        meta={"threshold": 1.0},
+    )
+    return envelope, runs
+
+
+def _analysis(state: AnalysisState = AnalysisState.DONE, **kwargs) -> AnalysisResult:
+    return AnalysisResult(
+        id="pns.safe.levels", version=1, target="scanner-a", state=state, **kwargs
+    )
+
+
+def _matrix_with_analyses() -> ResultMatrix:
+    """Two targets, and an analysis result of each state: with series, with an empty series,
+    "not evaluated" and "error"."""
+    return ResultMatrix(
+        sequence="test.seq",
+        package_version="0.1.0rc3",
+        targets=(
+            TargetInfo(name="scanner-a", sources={}, unused_sections=()),
+            TargetInfo(name="scanner-b", sources={}, unused_sections=()),
+        ),
+        results=(_result(State.PASS),),
+        analyses=(
+            _analysis(series=_series_pair()),
+            AnalysisResult("seq.index", 2, "scanner-a", AnalysisState.DONE),
+            AnalysisResult(
+                "pns.safe.levels",
+                1,
+                "scanner-b",
+                AnalysisState.NOT_EVALUATED,
+                reason="the target does not give: model pns.safe",
+            ),
+            AnalysisResult(
+                "seq.index", 2, "scanner-b", AnalysisState.ERROR, reason="ValueError: a message"
+            ),
+        ),
+    )
+
+
+def test_json_round_trip_with_analyses():
+    m = _matrix_with_analyses()
+    text = m.to_json()
+    back = ResultMatrix.from_json(text)
+    assert back == m
+    assert back.to_json() == text
+    json.loads(text, parse_constant=lambda c: pytest.fail(f"non-strict JSON constant {c}"))
+    series = back.analyses[0].series
+    assert series[0].arrays["min"].dtype == np.float32
+    assert series[0].meta["peak"] == math.inf
+    assert math.isnan(series[0].meta["unknown"])
+    assert math.isnan(series[0].arrays["max"][1])
+    assert back.analyses[1].series == ()
+
+
+def test_json_writes_the_analyses_after_the_results():
+    m = _matrix_with_analyses()
+    obj = json.loads(m.to_json())
+    assert list(obj) == ["format", "package_version", "sequence", "targets", "results", "analyses"]
+    assert len(obj["analyses"]) == 4
+    first = obj["analyses"][0]
+    assert list(first) == ["id", "version", "target", "state", "reason", "series"]
+    assert (first["id"], first["version"], first["target"]) == ("pns.safe.levels", 1, "scanner-a")
+    assert (first["state"], first["reason"]) == ("done", None)
+    assert first["series"] == [s.to_obj() for s in m.analyses[0].series]
+    assert [a["state"] for a in obj["analyses"]] == ["done", "done", "not evaluated", "error"]
+    assert obj["analyses"][2]["reason"] == "the target does not give: model pns.safe"
+    assert obj["analyses"][1]["series"] == []
+    # A matrix without analyses writes the key, with an empty list.
+    assert json.loads(_full_matrix().to_json())["analyses"] == []
+    assert '"analyses": []' in _full_matrix().to_json()
+
+
+@pytest.mark.parametrize(
+    "path, text",
+    [
+        (["analyses"], "missing key 'analyses'"),
+        (["analyses", 0, "reason"], "missing key 'reason'"),
+        (["analyses", 0, "series"], "missing key 'series'"),
+    ],
+    ids=["matrix", "analysis result", "series of an analysis result"],
+)
+def test_from_json_rejects_a_missing_key_of_the_analyses(path, text):
+    with pytest.raises(ValueError, match=text):
+        ResultMatrix.from_json(_set(path, _DELETE, _matrix_with_analyses))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [["analyses", 0, "extra"], ["analyses", 0, "series", 0, "extra"]],
+    ids=["analysis result", "series"],
+)
+def test_from_json_rejects_an_unknown_key_of_the_analyses(path):
+    with pytest.raises(ValueError, match="unknown key 'extra'"):
+        ResultMatrix.from_json(_set(path, 1, _matrix_with_analyses))
+
+
+@pytest.mark.parametrize(
+    "path, value",
+    [
+        (["analyses"], {}),
+        (["analyses"], None),
+        (["analyses", 0], "a string"),
+        (["analyses", 0, "version"], "1"),
+        (["analyses", 0, "version"], 1.0),
+        (["analyses", 0, "version"], True),
+        (["analyses", 0, "version"], None),
+        (["analyses", 0, "state"], "finished"),
+        (["analyses", 0, "state"], "pass"),
+        (["analyses", 0, "state"], None),
+        (["analyses", 0, "state"], ["done"]),
+        (["analyses", 0, "series"], {}),
+        (["analyses", 0, "series"], None),
+        (["analyses", 0, "series", 0], "a string"),
+        (["analyses", 0, "series", 0, "kind"], "lines"),
+        (["analyses", 0, "series", 0, "arrays", "min", "data"], "not base64!"),
+    ],
+    ids=[
+        "analyses is an object",
+        "analyses is null",
+        "analysis result is a string",
+        "version is a string",
+        "version is a float",
+        "version is a bool",
+        "version is null",
+        "state is not a state",
+        "state is a state of a check",
+        "state is null",
+        "state is a list",
+        "series is an object",
+        "series is null",
+        "series is a string",
+        "series has an unknown kind",
+        "array does not decode",
+    ],
+)
+def test_from_json_rejects_a_bad_analysis_result(path, value):
+    with pytest.raises(ValueError):
+        ResultMatrix.from_json(_set(path, value, _matrix_with_analyses))
+
+
+def test_a_matrix_has_no_analyses_by_default_and_finds_an_analysis_by_target_and_id():
+    assert _matrix().analyses == ()
+    assert _matrix().analysis("scanner-a", "pns.safe.levels") is None
+    m = _matrix_with_analyses()
+    for a in m.analyses:
+        assert m.analysis(a.target, a.id) is a
+    assert m.analysis("scanner-a", "seq.index") is m.analyses[1]
+    assert m.analysis("scanner-b", "seq.index") is m.analyses[3]
+    assert m.analysis("scanner-a", "gradient.limits") is None
+    assert m.analysis("scanner-c", "seq.index") is None
+
+
+def test_without_series_removes_the_series_of_each_analysis_result_and_changes_nothing_else():
+    original = _matrix_with_analyses()
+    m = original.without_series()
+    assert all(a.series == () for a in m.analyses)
+    assert [(a.id, a.version, a.target, a.state, a.reason) for a in m.analyses] == [
+        (a.id, a.version, a.target, a.state, a.reason) for a in original.analyses
+    ]
+    assert (m.sequence, m.package_version, m.targets, m.results) == (
+        original.sequence,
+        original.package_version,
+        original.targets,
+        original.results,
+    )
+    assert original.analyses[0].series == _series_pair()
+    assert m.without_series() == m
+    assert ResultMatrix.from_json(m.to_json()) == m
+    assert _full_matrix().without_series() == _full_matrix()
+
+
+def test_the_analyses_do_not_change_the_exit_status_and_with_max_findings_keeps_them():
+    failed = AnalysisResult("a", 1, "scanner-a", AnalysisState.ERROR, reason="E: m")
+    not_evaluated = AnalysisResult("b", 1, "scanner-a", AnalysisState.NOT_EVALUATED, reason="r")
+    for results, status in [([_result(P)], 0), ([_result(F)], 2), ([_result(F), _result(E)], 1)]:
+        plain = _matrix(*results)
+        m = ResultMatrix(
+            plain.sequence,
+            plain.package_version,
+            plain.targets,
+            plain.results,
+            analyses=(failed, not_evaluated, _analysis(series=_series_pair())),
+        )
+        assert m.exit_status() == plain.exit_status() == status
+    m = _matrix_with_findings()
+    m = ResultMatrix(
+        m.sequence, m.package_version, m.targets, m.results, analyses=(failed, not_evaluated)
+    )
+    limited = m.with_max_findings(1)
+    assert limited.analyses == m.analyses
+    assert limited.results == _matrix_with_findings().with_max_findings(1).results
+    assert _matrix_with_analyses().with_max_findings(0) == _matrix_with_analyses()

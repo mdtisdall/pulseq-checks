@@ -684,6 +684,63 @@ def test_a_run_without_findings_has_no_findings_part_and_the_flags_change_nothin
     assert capsys.readouterr().out == plain
 
 
+def test_analysis_writes_the_result_with_its_series_in_the_json(monkeypatch, seq_file, capsys):
+    install(monkeypatch)
+    status = main(
+        [str(seq_file), "--target", str(PROFILES / "prisma.toml"), "--analysis", "pns.safe.levels"]
+        + ["--json", "-"]
+    )
+    captured = capsys.readouterr()
+    assert status == 0
+    data = json.loads(captured.out)
+    assert data["results"] == []
+    (analysis,) = data["analyses"]
+    assert (analysis["id"], analysis["target"], analysis["state"]) == (
+        "pns.safe.levels",
+        "Prisma AS82",
+        "done",
+    )
+    names = [series["name"] for series in analysis["series"]]
+    assert "pns_total" in names
+    assert "pns_above_1" in names
+    assert "results: no check ran" in captured.err
+
+
+def test_analysis_with_a_config_adds_to_the_config(monkeypatch, tmp_path, seq_file, capsys):
+    install(monkeypatch)
+    config = tmp_path / "check.toml"
+    config.write_text(f'format = 1\ntargets = ["{PROFILES / "prisma.toml"}"]\nselect = []\n')
+    status, matrix = run_to_matrix(
+        tmp_path, [str(seq_file), "--config", str(config), "--analysis", "seq.index"], capsys
+    )
+    assert status == 0
+    assert [(a.id, a.state.value) for a in matrix.analyses] == [("seq.index", "done")]
+
+
+def test_an_analysis_that_is_not_installed_gives_status_1_and_names_it(seq_file, profile_a, capsys):
+    status = main([str(seq_file), "--target", str(profile_a), "--analysis", "no.such"])
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "no.such" in captured.err
+    assert captured.out == ""
+
+
+def test_an_analysis_that_is_not_evaluated_has_summary_lines_and_keeps_the_status(
+    monkeypatch, seq_file, profile_a, capsys
+):
+    install(monkeypatch)
+    status = main([str(seq_file), "--target", str(profile_a), "--analysis", "pns.safe.levels"])
+    out = capsys.readouterr().out
+    assert status == 0
+    lines = out.splitlines()
+    assert "results: no check ran" in lines
+    assert "not evaluated and errors:" in lines
+    at = lines.index("  not evaluated: analysis pns.safe.levels, target a")
+    assert "pns.safe" in lines[at + 1]
+    assert lines[at + 1].startswith("    ")
+    assert lines[-1] == "exit status 0: no check failed"
+
+
 def test_the_console_script_is_the_main_function_of_the_cli():
     scripts = importlib.metadata.entry_points(group="console_scripts")
     assert scripts["pulseq-check"].value == "pulseq_checks.cli:main"

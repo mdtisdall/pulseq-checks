@@ -79,6 +79,7 @@ def section(spec: CheckSpec) -> str:
         ("Inputs", as_code(spec.inputs)),
         ("Models", as_code(spec.models)),
         ("Rasters", as_code(spec.rasters)),
+        ("Analyses", as_code(spec.analyses)),
         ("Limit", spec.limit),
         ("Tolerance", spec.tolerance),
         ("Pass condition", spec.pass_condition),

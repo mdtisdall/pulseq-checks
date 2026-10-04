@@ -1,27 +1,22 @@
 """The gradient check rules (plan section 4.7): `gradient.amplitude.axis`,
 `gradient.slew.axis` and `gradient.amplitude.any-orientation`.
 
-The three rules share one measurement, `gradient_limits` over the whole file, which
-`ctx.measure` calculates one time for each target. `gradient_limits` has no argument for the
-limits: its numbers do not depend on them. The limit of a rule comes from the
+The three rules share one measurement, the analysis `gradient.limits` over the whole file,
+which `ctx.analysis` calculates one time for each target. `gradient_limits` has no argument for
+the limits: its numbers do not depend on them. The limit of a rule comes from the
 `HardwareLimits` of the target, which `_hardware_limits` builds for all three rules in one
 way.
 
 A rule that fails also gives each block that is above its limit as a finding. The values of
-each block come from a second measurement, `gradient_blocks` (`block_gradient_values`), which
-`ctx.measure` calculates one time for each target too, and only when a rule fails."""
+each block come from a second analysis, `gradient.blocks` (`block_gradient_values`), which
+`ctx.analysis` calculates one time for each target too, and only when a rule fails."""
 
 from __future__ import annotations
 
 import math
 
 import numpy as np
-from pulseq_analysis.grad_limits import (
-    BlockGradientValues,
-    GradientLimits,
-    block_gradient_values,
-    gradient_limits,
-)
+from pulseq_analysis.grad_limits import BlockGradientValues, GradientLimits
 
 from ..profile import HardwareLimits
 from ..results import Finding, Location, Result, State
@@ -79,6 +74,7 @@ _NOT_PROMISED_WAVEFORM = (
     "makes the waveform on the scanner in a way that the check does not know, and the value "
     "describes the waveform of the file only."
 )
+_ANALYSES = ("gradient.limits", "gradient.blocks")
 _NOT_EVALUATED_RASTERS = (
     'The check is "not evaluated" when the file does not declare GradientRasterTime or '
     "BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime "
@@ -110,21 +106,11 @@ def _hardware_limits(ctx: RunContext) -> HardwareLimits:
     )
 
 
-def _gamma(ctx: RunContext) -> float:
-    """The gamma, in Hz/T, of the measurements of the target of `ctx`: the same gamma as the
-    limits of `_hardware_limits`, so that value and limit are in the same units."""
-    if ctx.limits_source == "sequence object":
-        return ctx.sequence.system.gamma
-    return ctx.profile.make_opts().gamma
-
-
 def _measurement(ctx: RunContext) -> tuple[GradientLimits, HardwareLimits]:
     """The measurement of the whole file, calculated one time for each target, and the
     `HardwareLimits` of the target."""
     limits = _hardware_limits(ctx)
-    gamma = _gamma(ctx)
-    measurement = ctx.measure("gradient_limits", lambda seq: gradient_limits(seq, gamma=gamma))
-    return measurement, limits
+    return ctx.analysis("gradient.limits"), limits
 
 
 def _above_limit(value, limit: float):
@@ -203,10 +189,7 @@ class _GradientCheck:
         state = State.FAIL if _above_limit(value, limit) else State.PASS
         findings: tuple[Finding, ...] = ()
         if state is State.FAIL:
-            gamma = _gamma(ctx)
-            blocks = ctx.measure(
-                "gradient_blocks", lambda seq: block_gradient_values(seq, gamma=gamma)
-            )
+            blocks = ctx.analysis("gradient.blocks")
             findings = self._findings(blocks, limit)
         return ctx.result(
             self.spec,
@@ -292,6 +275,7 @@ class _AmplitudeAxis(_GradientCheck):
                 "rotation. " + _NOT_PROMISED_WAVEFORM
             ),
         ),
+        analyses=_ANALYSES,
     )
     unit = "mT/m"
 
@@ -424,6 +408,7 @@ class _SlewAxis(_GradientCheck):
                 + _NOT_PROMISED_WAVEFORM
             ),
         ),
+        analyses=_ANALYSES,
     )
     unit = "T/m/s"
 
@@ -546,6 +531,7 @@ class _AmplitudeAnyOrientation(_GradientCheck):
                 + _NOT_PROMISED_WAVEFORM
             ),
         ),
+        analyses=_ANALYSES,
     )
     unit = "mT/m"
 

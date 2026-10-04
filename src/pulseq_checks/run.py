@@ -9,10 +9,22 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pypulseq as pp
+from pulseq_analysis.analyses import Analysis
+from pulseq_analysis.series import Series
 
 from . import registry
+from .bindings import unavailable
 from .profile import RASTER_OPTS, HardwareLimits, TargetProfile
-from .results import CheckRunError, Finding, Result, ResultMatrix, State, TargetInfo
+from .results import (
+    AnalysisResult,
+    AnalysisState,
+    CheckRunError,
+    Finding,
+    Result,
+    ResultMatrix,
+    State,
+    TargetInfo,
+)
 from .rules import CheckRule, RunContext
 
 # `ResultMatrix.sequence` for a `Sequence` object, and `TargetInfo.limits_source` and the
@@ -28,7 +40,8 @@ RASTER_DEFAULT = "pypulseq default"
 
 class RunError(CheckRunError):
     """An error of the run that `run_checks` finds: for example no target, a check ID that
-    is not known, or a `.seq` file that cannot be read (exit status 1, R2)."""
+    is not known, an analysis ID that is not installed, or a `.seq` file that cannot be read
+    (exit status 1, R2)."""
 
 
 def run_checks(
@@ -39,6 +52,7 @@ def run_checks(
     required: Mapping[str, Sequence[str] | None] | None = None,
     fast_only: bool = False,
     limits_from_sequence: bool = False,
+    analyses: Sequence[str] = (),
 ) -> ResultMatrix:
     """Run the check rules on `sequence` for each of `targets`. Raises `RunError`.
 
@@ -50,7 +64,15 @@ def run_checks(
     not "fast" and that are not required (R4: it does not make a check required).
     `limits_from_sequence` is the opt-in of decision 4: for a `Sequence` object, a target
     with neither `opts.max_grad` nor `opts.max_slew` gets its gradient limits from
-    `seq.system`. The results are in the order of the targets, then of the check IDs."""
+    `seq.system`. The results are in the order of the targets, then of the check IDs.
+
+    `analyses` are the IDs of the analyses of pulseq-analysis whose results the matrix keeps
+    (`ResultMatrix.analyses`), for each target, in the order of the targets, then of the
+    sorted IDs. The run calculates each one for each target, also when no check uses it and
+    `select` is empty. `select`, `required` and `fast_only` do not affect them: they are
+    not checks. An ID that is not installed is a `RunError`, before the sequence is read. An
+    analysis that is not available for a target gives "not evaluated", and an exception of
+    the analysis gives "error". Neither changes the exit status."""
     required = {} if required is None else required
     is_path = isinstance(sequence, (str, Path))
     if not targets:
@@ -71,11 +93,17 @@ def run_checks(
         )
 
     rules = registry.check_rules()
+    installed = registry.analyses()
     run_ids = _checks_to_run(rules, select, required, names, fast_only)
+    analysis_ids = sorted(set(analyses))
+    for analysis_id in analysis_ids:
+        if analysis_id not in installed:
+            raise RunError(f"analyses names the analysis {analysis_id!r}, which is not installed")
     required_ids = {check_id: _required_targets(required[check_id], names) for check_id in required}
 
     target_infos = []
     results = []
+    analysis_results = []
     for target in targets:
         if is_path:
             seq, undeclared = _read_sequence(sequence, target)
@@ -90,11 +118,13 @@ def run_checks(
             limits_source=limits_source,
             hardware_limits=hardware_limits,
             raster_sources=_raster_sources(target, undeclared),
+            analyses=installed,
         )
         for check_id in run_ids:
-            result = _run_rule(rules[check_id], ctx)
+            result = _run_rule(rules[check_id], ctx, installed)
             is_required = target.name in required_ids.get(check_id, ())
             results.append(dataclasses.replace(result, required=is_required))
+        analysis_results.extend(_run_analysis(installed[i], ctx) for i in analysis_ids)
         target_infos.append(
             TargetInfo(
                 name=target.name,
@@ -108,6 +138,7 @@ def run_checks(
         package_version=importlib.metadata.version("pulseq-checks"),
         targets=tuple(target_infos),
         results=tuple(results),
+        analyses=tuple(analysis_results),
     )
 
 
@@ -216,14 +247,53 @@ def _hardware_limits(
     return "profile", target.hardware_limits
 
 
-def _run_rule(rule: CheckRule, ctx: RunContext) -> Result:
+def _run_analysis(analysis: Analysis, ctx: RunContext) -> AnalysisResult:
+    """The result of `analysis` for the target of `ctx`: "not evaluated" when the analysis is
+    not available for the target (`bindings.unavailable`); else "done" with the series of
+    `to_series`; "error" when `compute` or `to_series` raises an exception, or when
+    `to_series` gives something other than a tuple of `Series`."""
+    spec = analysis.spec
+    reasons = unavailable(ctx, analysis)
+
+    def result(state: AnalysisState, **fields) -> AnalysisResult:
+        return AnalysisResult(spec.id, spec.version, ctx.profile.name, state, **fields)
+
+    if reasons:
+        return result(AnalysisState.NOT_EVALUATED, reason="; ".join(reasons))
+    try:
+        series = analysis.to_series(ctx.analysis(spec.id))
+    except Exception as e:  # noqa: BLE001 (an exception of an analysis is its result)
+        return result(AnalysisState.ERROR, reason=f"{type(e).__name__}: {e}")
+    if not isinstance(series, tuple):
+        reason = f"to_series gave {type(series).__name__}, not a tuple of Series"
+    elif any(not isinstance(s, Series) for s in series):
+        bad = next(s for s in series if not isinstance(s, Series))
+        reason = f"to_series gave an item of type {type(bad).__name__}, not a Series"
+    else:
+        return result(AnalysisState.DONE, series=series)
+    return result(AnalysisState.ERROR, reason=reason)
+
+
+def _run_rule(rule: CheckRule, ctx: RunContext, installed: Mapping[str, Analysis]) -> Result:
     """The result of `rule` for the target of `ctx`: "not evaluated" before `run` when an
-    input or a model is missing, or when a raster that the check uses is neither in the file
-    nor in the target (it is a pypulseq default), "error" when `run` raises an exception,
-    gives a result of a different check or target, gives findings that are not a tuple of
-    `Finding`, or gives a `findings_omitted` that is not an `int` (not a `bool`) of 0 or
-    more."""
+    input or a model is missing, when a raster that the check uses is neither in the file
+    nor in the target (it is a pypulseq default), or else when an analysis in `spec.analyses`
+    is not available for the target (`bindings.unavailable`). It is "error" before `run` when an
+    analysis in `spec.analyses` is not in `installed`, and "error" when `run` raises an
+    exception, gives a result of a different check or target, gives findings that are not a
+    tuple of `Finding`, or gives a `findings_omitted` that is not an `int` (not a `bool`) of 0
+    or more."""
     spec = rule.spec
+    absent = [analysis_id for analysis_id in spec.analyses if analysis_id not in installed]
+    if absent:
+        return ctx.result(
+            spec,
+            State.ERROR,
+            reason=(
+                "the check declares analyses that are not installed: "
+                f"{', '.join(repr(analysis_id) for analysis_id in absent)}"
+            ),
+        )
     missing = [f"input {path}" for path in spec.inputs if not ctx.has_input(path)]
     missing += [f"model {name}" for name in spec.models if name not in ctx.profile.models]
     reasons = []
@@ -236,6 +306,12 @@ def _run_rule(rule: CheckRule, ctx: RunContext) -> Result:
             f"{ctx.profile.name!r} does not give "
             f"{', '.join(f'rasters.{name}' for name in defaults)}"
         )
+    if not reasons:
+        # Only when the rules of the check itself pass: the analyses of a check of this package
+        # need the same models and rasters as the check, and the reason must not give them two
+        # times.
+        for analysis_id in spec.analyses:
+            reasons += unavailable(ctx, installed[analysis_id])
     if reasons:
         return ctx.result(spec, State.NOT_EVALUATED, reason="; ".join(reasons))
     try:

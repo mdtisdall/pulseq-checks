@@ -32,7 +32,7 @@ Contents:
 2. [Tests](#2-tests): the package; the SAFE model; the target profile, the
    results, the run function and the check configuration; the Siemens `.asc`
    profile reader; the version 1 checks (timing, gradient and PNS); the
-   command; the time budget. The tests of the measurement modules are in the
+   command; the time budget; the analysis bindings. The tests of the measurement modules are in the
    package pulseq-analysis.
 
 ---
@@ -1003,8 +1003,10 @@ names the profile file and the `.asc` file.
 
 These tests cover `Finding` (plan check-findings, section 4.1), `ResultMatrix`: its exit status
 (design section 5.6, R3), its JSON form (decision 9 of the plan, with the findings of plan
-check-findings, section 4.5) and `ResultMatrix.with_max_findings` (section 4.6). They build
-the results directly, with no sequence.
+check-findings, section 4.5) and `ResultMatrix.with_max_findings` (section 4.6). They also
+cover the analysis results of the matrix (`AnalysisResult`, `ResultMatrix.analyses`,
+`analysis` and `without_series`, and the key `"analyses"` of the JSON form, design section
+4.6). They build the results directly, with no sequence.
 
 #### `test_exit_status`
 
@@ -1055,13 +1057,14 @@ back.
 #### `test_json_has_the_keys_of_decision_9`
 
 **Checks:** The JSON object has `"format": 1` and the keys of decision 9, in a fixed order:
-`format`, `package_version`, `sequence`, `targets`, `results`. A target has `name`, `sources`
+`format`, `package_version`, `sequence`, `targets`, `results`, `analyses`. A target has `name`, `sources`
 (an object), `unused_sections` (a list) and `limits_source`. A result has each `Result` field,
 with `state` as its value text (for example "not evaluated") and `location` as
 `{"block": ..., "time_s": ...}` or `null`, and the keys `findings` (a list) and
 `findings_omitted` (an integer) after `spec_url`. A finding is an object with the keys `code`,
 `message`, `location` and `data`, in this order. A result with no findings has `"findings": []`
-and `"findings_omitted": 0`.
+and `"findings_omitted": 0`. The matrix with every field set has no analysis result, so its
+`analyses` is an empty list.
 
 **How:** The test parses the text of a matrix with every field set, and compares the lists of
 keys and some values, also those of its finding. It checks the state text, the `null` location,
@@ -1304,12 +1307,121 @@ findings.
 
 **Assumptions:** A bool is not an integer for this check, as for `format`.
 
+#### `test_json_round_trip_with_analyses`
+
+**Checks:** `ResultMatrix.from_json(m.to_json()) == m`, and the new matrix gives the same text
+again, for a matrix with two targets and four analysis results: one "done" with an envelope
+series (float32 arrays with `inf`, `-inf` and `nan` in the values, and `inf`, `-inf` and `nan`
+in `meta`) and a runs series (an int64 array, and a float with a sum that is not exact), one
+"done" with no series, one "not evaluated" with a reason, and one "error" with a reason. The
+text is strict JSON. The arrays keep their dtype and their values, and the values of `meta`
+that are not finite are floats again.
+
+**How:** The test writes the text, reads it back, and compares the matrices and the two texts.
+It parses the text again with a `parse_constant` function that fails the test on a non-finite
+constant, and checks the dtype and some values of the series that it read.
+
+**Assumptions:** The equality of a matrix with `nan` in a series is the equality of
+`Series` (a `nan` equals a `nan`). The encoding of one array is tested in pulseq-analysis.
+
+#### `test_json_writes_the_analyses_after_the_results`
+
+**Checks:** The JSON object has the key `analyses` after `results`. Each analysis result is an
+object with the keys `id`, `version`, `target`, `state`, `reason` and `series`, in this order.
+`state` is the value text of the state ("done", "not evaluated" or "error"), and `series` is
+the list of `Series.to_obj` of its series. A matrix with no analysis result has
+`"analyses": []`.
+
+**How:** The test parses the text of a matrix with four analysis results and compares the
+keys, some values and the series with the `to_obj` of the series. It parses the text of a
+matrix with no analysis result and looks for the empty list.
+
+**Assumptions:** None.
+
+#### `test_from_json_rejects_a_missing_key_of_the_analyses`
+
+**Checks:** `from_json` raises `ValueError` that names the key when the matrix has no key
+`analyses` (a text of the earlier release candidate, decision P5 of the implementation plan),
+when an analysis result has no key `reason` or `series`.
+
+**How:** The test is parametrized. It deletes the key from the JSON of a matrix with analysis
+results and matches the message.
+
+**Assumptions:** None.
+
+#### `test_from_json_rejects_an_unknown_key_of_the_analyses`
+
+**Checks:** `from_json` raises `ValueError` with "unknown key 'extra'" when an analysis result
+has an extra key, and when one of its series has an extra key.
+
+**How:** The test is parametrized over the two objects. It adds the key to the JSON and
+matches the message.
+
+**Assumptions:** The check of the keys of a series is that of `Series.from_obj`, which this
+test uses and does not test in full.
+
+#### `test_from_json_rejects_a_bad_analysis_result`
+
+**Checks:** `from_json` raises `ValueError` for `analyses` that is not a list, an analysis
+result that is not an object, a `version` that is not an integer (a string, a float, a bool
+and `null`), a `state` that is not a state of an analysis (also "pass", the state of a check,
+`null` and a list), `series` that is not a list, a series that is not an object, a series with
+an unknown kind, and an array whose data does not decode.
+
+**How:** The test is parametrized. It sets one value in the JSON of a matrix with analysis
+results and expects `ValueError` (the type is the one that a caller of `from_json` catches).
+
+**Assumptions:** The test does not check the text of the messages. A `ValueError` of
+`Series.from_obj` stays a `ValueError`.
+
+#### `test_a_matrix_has_no_analyses_by_default_and_finds_an_analysis_by_target_and_id`
+
+**Checks:** A `ResultMatrix` made without `analyses` has `()`. `ResultMatrix.analysis(target,
+id)` gives the analysis result of that target and ID, and `None` for a target or an ID that
+the matrix does not have, also for the matrix with no analysis result.
+
+**How:** The test asks for each analysis result of a matrix with four of them (two IDs for two
+targets) and checks that it gets the same object. It asks for an ID that is not in the matrix
+and for a target that is not in the matrix.
+
+**Assumptions:** None.
+
+#### `test_without_series_removes_the_series_of_each_analysis_result_and_changes_nothing_else`
+
+**Checks:** `without_series()` gives a new matrix whose analysis results have no series and
+the same `id`, `version`, `target`, `state` and `reason`. The sequence, the package version,
+the targets and the results are the same. The first matrix is not changed. A second call
+gives an equal matrix, a matrix with no analysis result is equal to itself, and the new matrix
+survives a JSON round trip.
+
+**How:** The test calls the function on a matrix with series and compares the fields, the
+original series, the second call and the round trip.
+
+**Assumptions:** None.
+
+#### `test_the_analyses_do_not_change_the_exit_status_and_with_max_findings_keeps_them`
+
+**Checks:** The analysis results do not change `exit_status()`: for a matrix with a pass, a
+fail and a fail with an error, the status is 0, 2 and 1 whatever its analysis results are
+("error", "not evaluated" and "done"). `with_max_findings` keeps the analysis results, and
+the matrix that it gives has the same results as without them. For a matrix whose results have
+no finding, `with_max_findings(0)` gives an equal matrix.
+
+**How:** The test makes the matrices with and without analysis results and compares the exit
+statuses and the matrices.
+
+**Assumptions:** The analysis results have no `required` flag, so there is no state of an
+analysis that gives status 1.
+
 ### 2.4 The run function (`test_run.py`)
 
 These tests check `run_checks`, the `RunContext` that it gives to a rule, `spec_url`, and
 the entry-point registry (`registry.py`). No test uses an installed check. Each test
 defines its own check rules: a small class with a `CheckSpec` and a `run` function. A test
-installs them by replacing `registry.check_rules` with monkeypatch. The registry tests
+installs them by replacing `registry.check_rules` with monkeypatch. The tests of the analyses
+(`analyses=` of `run_checks`, `RunContext.analysis`) use the installed analyses of
+pulseq-analysis, or `FakeAnalysis`, which a test installs by replacing `registry.analyses`.
+They also read `ResultMatrix.analyses` and, for the exit status, `exit_status()`. The registry tests
 replace `importlib.metadata.entry_points` and use fake entry points with a name, a `load`
 function and a `dist` with a package name. The targets are `TargetProfile` objects that the
 test builds directly (`make_profile`), so the tests do not read a profile file. The tests
@@ -1868,6 +1980,185 @@ of its three texts is a string that is not empty.
 **Assumptions:** The test does not check that a text is true. `scripts/check_docs.py` shows the
 texts in `docs/checks.md`, and the review of a change checks them. A new check of this package
 must be added to the list of IDs.
+
+#### `test_a_requested_analysis_gives_its_series_with_no_check`
+
+**Checks:** `run_checks(path, [target], select=[], analyses=["pns.safe.levels"])` gives no
+check result and one analysis result: the ID, version 1, the target name, the state "done", no
+reason, and the series of `to_series` of `pns_levels_for` for the same file, hardware and
+threshold. `ResultMatrix.analysis(target, id)` gives that result, and the exit status is 0.
+
+**How:** The test writes `spin_echo_sequence()` to a `.seq` file and runs it for a target with
+the SAFE parameters of pypulseq's example hardware. It reads the file again with the `Opts` of
+the target, calls `pns_levels_for` with `hw_from_dict` of the parameters, the name of the
+parameters as the label, and the threshold `PNS_LIMIT`, and compares the series of the
+analysis result with `to_series` of that value (the series `pns_total` and `pns_above_1`).
+
+**Assumptions:** The test does not check the values of the series: pulseq-analysis tests them.
+The comparison shows that the run function gives the hardware, the label and the threshold of
+the binding to `compute`.
+
+#### `test_the_requested_analyses_are_unique_and_sorted_for_each_target`
+
+**Checks:** The analysis results are in the order of the targets, then of the sorted IDs. An
+ID that is given two times gives one result. `fast_only` and `select` are not used here. A run
+with no `analyses` gives `()`.
+
+**How:** The test runs a file for two targets with `analyses=["seq.index", "gradient.limits",
+"seq.index"]` and `select=[]`, and compares the list of (target, ID, state). It runs a file
+without `analyses` and checks the empty tuple.
+
+**Assumptions:** The analyses `seq.index` and `gradient.limits` give no series, so their
+results have `series == ()`.
+
+#### `test_a_target_without_the_pns_safe_model_gives_not_evaluated_for_the_analysis`
+
+**Checks:** A target without `[models.pns.safe]` gives "not evaluated" for the analysis
+`pns.safe.levels`, with the reason "for the analysis pns.safe.levels, the target 'y' does not
+give: model pns.safe" and no series. The target with the model gives "done". A check that
+declares the analysis in `CheckSpec.analyses` gets "not evaluated" for the target without the
+model, with the same reason and no call of `run`, and runs for the other target.
+`CheckSpec.analyses` is `()` when a spec does not give it. The exit status is 0.
+
+**How:** The test runs a file for the targets `x` (with the model) and `y` (without it) with
+`analyses=["pns.safe.levels"]` and a test check that declares the analysis, and compares the
+analysis results, the check results and the contexts that the check got.
+
+**Assumptions:** The check does not call the analysis, so the test checks only the rule that
+makes "not evaluated" before `run`.
+
+#### `test_a_check_that_names_the_model_of_its_analysis_gives_its_own_reason_only`
+
+**Checks:** When the rules of a check itself give "not evaluated", the run function does not
+add the reasons of its analyses. A check whose spec names the model `pns.safe` and the
+analysis `pns.safe.levels` gives the same reason as a check that names only the model.
+
+**How:** The test installs two fake rules, both with the model `pns.safe`, one also with the
+analysis `pns.safe.levels`, and runs them for a target without the model. It checks that both
+are "not evaluated" with the same reason, which names the model one time, and that neither
+`run` is called.
+
+**Assumptions:** The checks of this package name in their specs the models and the rasters
+that their analyses need, so their reasons do not change (design section 4.5).
+
+#### `test_a_default_gradient_raster_gives_not_evaluated_for_pns_safe_levels`
+
+**Checks:** When the file does not declare `GradientRasterTime` and the target does not give
+`rasters.GradientRasterTime`, the analysis `pns.safe.levels` is "not evaluated" with the
+reason that names the file, the raster and the target. A target that gives the raster gets
+"done". An analysis without a raster (`seq.index`) is "done" for both.
+
+**How:** The test removes the line of `GradientRasterTime` from a `.seq` file and runs it for
+two targets with the SAFE parameters, one with `rasters.GradientRasterTime` (the value of the
+file before) and one without. It compares the states and the full reason.
+
+**Assumptions:** The raster of the target is the same as that of the file that the test
+removed, so that the analysis can run on the file.
+
+#### `test_a_file_without_two_rasters_gives_one_reason_for_a_gradient_analysis`
+
+**Checks:** A file without `GradientRasterTime` and `BlockDurationRaster`, and a target
+without both rasters, gives "not evaluated" for `gradient.limits` with one reason that names
+both rasters and both profile paths.
+
+**How:** The test removes the two lines from a `.seq` file, runs it with
+`analyses=["gradient.limits"]` and compares the full reason.
+
+**Assumptions:** The test ignores the warning of pypulseq about the missing definition.
+
+#### `test_an_analysis_that_fails_gives_error_and_does_not_change_the_exit_status`
+
+**Checks:** An analysis whose `compute` raises, whose `to_series` raises, or whose `to_series`
+gives a list or a tuple with an item that is not a `Series`, gives the state "error" with the
+reason `"<exception type>: <message>"` or a text that names the type of the bad value, no
+series, and the ID, the version and the target. The exit status is 0 for a run with no check,
+and a run with a failing check keeps its status 2 (the same as without the analysis). The
+other checks still run.
+
+**How:** The test is parametrized over the four faults of a `FakeAnalysis`. It runs a file with
+`select=[]` and then with a failing and a passing test check, and compares the analysis
+results, the check states and the exit statuses.
+
+**Assumptions:** The analysis is a fake: the test shows the rule of the run function, and not
+a fault of a real analysis.
+
+#### `test_a_check_that_declares_an_analysis_whose_compute_raises_gives_error`
+
+**Checks:** When two checks call `ctx.analysis` for an analysis whose `compute` raises, and the
+caller also asks for that analysis, both checks give "error" and the analysis result is
+"error", all with the reason of the exception, and `compute` runs one time for each target (two
+times for two targets, with two different sequence objects). The exit status is 1.
+
+**How:** The test installs a `FakeAnalysis` that raises `ValueError`, two test checks that call
+`ctx.analysis`, and runs a file for two targets with `analyses=["t.x"]`. It counts the calls of
+`compute`.
+
+**Assumptions:** The kept exception is raised again for the second caller. The test counts the
+calls of the fake: it does not time anything.
+
+#### `test_an_analysis_that_is_not_installed_is_a_run_error_before_the_file_is_read`
+
+**Checks:** An ID in `analyses` that is not installed is a `RunError` that names the ID. The
+error comes before the read of the file, so a path that does not exist gives it, not the error
+of the read. A check that declares an analysis that is not installed gives "error" with a
+reason that lists the IDs that are not installed (and not the installed ones), and `run` is not
+called.
+
+**How:** The test runs a path that does not exist with `analyses=["seq.index", "no.such"]` and
+checks the message. It runs a test check with `analyses=("seq.index", "no.such", "no.other")`
+and compares the state, the reason and the contexts.
+
+**Assumptions:** The message of the error is checked only for the ID.
+
+#### `test_fast_only_keeps_a_requested_slow_analysis`
+
+**Checks:** With `fast_only=True`, a requested analysis whose cost is "slow" runs and gives
+"done". The slow check is removed, as before.
+
+**How:** The test installs a slow and a fast `FakeAnalysis`, a slow and a fast test check, runs
+with `fast_only=True` and `analyses=["t.slow", "t.fast"]`, and compares the checks that ran,
+the analysis results and the number of calls of the slow analysis.
+
+**Assumptions:** The cost class of an analysis is not used by the run function.
+
+#### `test_an_analysis_without_a_binding_is_available_only_without_parameters`
+
+**Checks:** An analysis that has no binding in `bindings.BINDINGS` and no parameter is "done",
+and `compute` gets no keyword argument. One with parameters is "not evaluated" with a reason
+that says that pulseq-checks has no binding for its parameters (and names them), and its
+`compute` is not called.
+
+**How:** The test installs two `FakeAnalysis` (with and without parameters), runs with
+`select=[]` and compares the results and the calls.
+
+**Assumptions:** None.
+
+#### `test_a_context_made_by_hand_loads_the_analyses_on_its_first_call_and_keeps_the_results`
+
+**Checks:** `RunContext.analysis` of a context made without `analyses` loads
+`registry.analyses()` on its first call, not before, and one time. `compute` runs one time for
+each ID: a second call gives the same object. An exception of `compute` is raised again, the
+same exception object, and `compute` is not called again. An ID that is not installed, and an
+analysis that is not available, raise `LookupError` with the reason, and do not call
+`compute`. A context made with `analyses` does not load the registry.
+
+**How:** The test replaces `registry.analyses` with a function that counts its calls, and uses
+three `FakeAnalysis`: one that gives a list, one that raises and one that has parameters.
+
+**Assumptions:** The test does not check the exception of a second call by its traceback.
+
+#### `test_the_registry_error_of_pulseq_analysis_is_a_registry_error_of_the_run`
+
+**Checks:** `registry.analyses()` gives the four analyses of pulseq-analysis by ID. A
+`RegistryError` of `pulseq_analysis.analyses.registry()` becomes a `RegistryError` of
+`pulseq_checks.registry` (a `CheckRunError`, so exit status 1), with the same message and the
+first error as its cause. `run_checks` raises it.
+
+**How:** The test lists the IDs. It replaces `pulseq_analysis.analyses.registry` with a function
+that raises, and calls `registry.analyses()` and `run_checks`.
+
+**Assumptions:** The list of the four IDs is that of pulseq-analysis `v0.1.0rc2`: a newer
+version of that package with more analyses changes it.
 
 #### `test_check_rules_are_keyed_by_spec_id`
 
@@ -2750,6 +3041,19 @@ pinned pypulseq reads from `seq.system` (the four rasters, the two RF times and 
 dead time). A newer pypulseq that reads more values needs a change here and in the
 specification.
 
+#### `test_the_analyses_of_the_checks_of_this_package_are_installed_analyses`
+
+**Checks:** The `analyses` of the spec of each check of this package (the checks of
+`registry.check_rules()` with no `url`) are IDs of the installed analyses
+(`registry.analyses()`), and `timing.pypulseq` has `("seq.index",)`.
+
+**How:** The test takes the IDs of the analyses of the registry and compares them with the
+`analyses` of each spec. It checks also that the three timing and PNS checks are among the
+checks that it examined, so that the loop is not empty.
+
+**Assumptions:** The checks of this package are installed as entry points. The analyses
+of the gradient and PNS checks are in the tests of the checks of those rules.
+
 ### 2.8 Gradient checks (`test_check_gradient.py`)
 
 These tests check the three gradient check rules of `checks/gradient.py`:
@@ -2904,7 +3208,7 @@ the value and that the location is None.
 **Checks:** When the measurement gives a value above 0 and no block, the location of the
 amplitude rule and of the any-orientation rule has the time and the block None.
 
-**How:** The test replaces `gradient_limits` in the check module with a function that
+**How:** The test replaces `compute` of the analysis `gradient.limits` with a function that
 gives a `GradientLimits` made by hand, with the peak 5 mT/m at 0.25 s and no block, and
 checks the value and that the location is `Location(block=None, time_s=0.25)`.
 
@@ -2975,14 +3279,14 @@ for `gradient.slew.axis`, with `opts.max_slew` in the reason.
 
 #### `test_the_three_checks_share_one_measurement_for_each_target`
 
-**Checks:** For a `.seq` file and two targets, `gradient_limits` runs one time for each
+**Checks:** For a `.seq` file and two targets, `compute` of `gradient.limits` runs one time for each
 target (two times for the three rules, not six), always over the whole file (no window)
 and with the gamma of that target only, and the rules compare with the hardware limits of
 the targets.
 
 **How:** The test writes a `.seq` file, runs the three rules for two targets with
-different limits, the spy on `gradient_limits` and the spy on `_hardware_limits`. It
-checks that all six results are "pass", that there are two calls of `gradient_limits`,
+different limits, the spy on `compute` of `gradient.limits` and the spy on
+`_hardware_limits`. It checks that all six results are "pass", that there are two calls,
 that the only keyword argument of each call is `gamma`, that the gamma is 42.576 MHz/T
 (the targets do not give `gamma`), and that the limits that the rules use are the
 `hardware_limits` of the two targets.
@@ -2992,11 +3296,11 @@ that the only keyword argument of each call is `gamma`, that the gamma is 42.576
 
 #### `test_the_three_checks_of_one_target_call_gradient_limits_one_time`
 
-**Checks:** For a `Sequence` object and one target, the three rules call `gradient_limits`
-one time, and compare with the hardware limits of the target.
+**Checks:** For a `Sequence` object and one target, the three rules call `compute` of
+`gradient.limits` one time, and compare with the hardware limits of the target.
 
-**How:** The test runs the three rules with the spy on `gradient_limits` and the spy on
-`_hardware_limits`. It checks that there is one call, and that each limits that the rules
+**How:** The test runs the three rules with the spy on `compute` of `gradient.limits` and the
+spy on `_hardware_limits`. It checks that there is one call, and that each limits that the rules
 use is the `hardware_limits` of the profile.
 
 **Assumptions:** None.
@@ -3136,17 +3440,17 @@ block (the start of the rise).
 
 #### `test_a_pass_has_no_findings_and_does_not_measure_the_blocks`
 
-**Checks:** For each of the three rules, a result of "pass" has no findings, and the measurement
-`gradient_blocks` is not calculated: `block_gradient_values` is not called, and the measurements
-of the `RunContext` have `gradient_limits` and not `gradient_blocks`.
+**Checks:** For each of the three rules, a result of "pass" has no findings, and the analysis
+`gradient.blocks` is not calculated: its `compute` is not called, and the analyses
+of the `RunContext` have `gradient.limits` and not `gradient.blocks`.
 
 **How:** The test runs the rule on `findings_sequence` with a limit that is 3 times the limit of
-the fail tests, with a `RunContext` that it makes, and with `block_gradient_values` of the check
-module replaced by a function that keeps the calls of the real one. It checks the state, the
-findings, the list of calls and the keys of `ctx._measurements`.
+the fail tests, with a `RunContext` that it makes, and with `compute` of `gradient.blocks`
+replaced by a function that keeps the calls of the real one. It checks the state, the
+findings, the list of calls and the keys of `ctx._analyses`.
 
-**Assumptions:** The test reads `ctx._measurements`, a private attribute, because the
-measurement is not visible in the result.
+**Assumptions:** The test reads `ctx._analyses`, a private attribute, because the
+analysis is not visible in the result.
 
 #### `test_a_fail_has_one_finding_for_each_block_and_axis_above_the_limit_in_order`
 
@@ -3177,14 +3481,14 @@ first segment (the rise) is the steepest one.
 
 #### `test_a_fail_measures_the_blocks_one_time_for_each_target_and_does_not_change_the_result`
 
-**Checks:** A fail calls `block_gradient_values` one time for each target, with the gamma that
-`gradient_limits` uses (the default 42.576 MHz/T for a profile without a gamma), and a second
+**Checks:** A fail calls `compute` of `gradient.blocks` one time for each target, with the gamma
+that `gradient.limits` uses (the default 42.576 MHz/T for a profile without a gamma), and a second
 run of the rule on the same `RunContext` gives the same findings without a second call. The value,
 the location and the reason of the result are the ones that the rule gives for a limit that the
 sequence does not reach; the limit and the unit are those of the target.
 
 **How:** The test runs the rule two times on one `RunContext` and a third time on a new one
-with the limit `FAR`, with `block_gradient_values` replaced as in the first test.
+with the limit `FAR`, with `compute` of `gradient.blocks` replaced as in the first test.
 
 **Assumptions:** None.
 
@@ -3931,6 +4235,52 @@ entry points (`uv sync --reinstall-package pulseq-checks`). The test does not ru
 script, and it does not check that the script uses the return value as the exit status: the
 wrapper that the build backend writes does that.
 
+#### `test_analysis_writes_the_result_with_its_series_in_the_json`
+
+**Checks:** `--analysis pns.safe.levels --json -` with the Prisma profile and no check rule
+gives status 0 and a JSON result with no check result and one analysis result for
+`pns.safe.levels`, target "Prisma AS82", state "done", whose series include `pns_total` and
+`pns_above_1`. The summary on the standard error says "results: no check ran".
+
+**How:** The test installs no check rule, runs `main` on the synthetic spin-echo file, and
+reads the standard output with `json.loads`.
+
+**Assumptions:** The names of the series are those of `PnsLevels.to_series` in
+pulseq-analysis. The values of the series are checked in `test_run.py`.
+
+#### `test_analysis_with_a_config_adds_to_the_config`
+
+**Checks:** With `--config` (a file with `select = []`), `--analysis seq.index` keeps one
+"done" analysis result in the JSON result (decision L12).
+
+**How:** The test writes a config file for the Prisma profile, runs `main` with `--json` and
+`--quiet`, and reads the matrix back.
+
+**Assumptions:** None.
+
+#### `test_an_analysis_that_is_not_installed_gives_status_1_and_names_it`
+
+**Checks:** `--analysis no.such` gives status 1, a message on the standard error that names
+`no.such`, and nothing on the standard output.
+
+**How:** The test runs `main` and reads `capsys`.
+
+**Assumptions:** The check of the ID is `run_checks` (`RunError`, `test_run.py`); this test
+shows that the command reports it.
+
+#### `test_an_analysis_that_is_not_evaluated_has_summary_lines_and_keeps_the_status`
+
+**Checks:** With a profile that has no `[models.pns.safe]`, `--analysis pns.safe.levels` gives
+in the part "not evaluated and errors:" the line `  not evaluated: analysis pns.safe.levels,
+target a`, then an indented reason line that names `pns.safe`. The part appears although no
+check result is a problem, "results: no check ran" stays, and the status is 0.
+
+**How:** The test installs no check rule, runs `main` with the profile `a` and splits the
+summary into lines.
+
+**Assumptions:** The text of the reason is that of `bindings.unavailable`; the test checks only
+that it names the model.
+
 ### 2.11 Time budget (`test_budget.py`)
 
 #### `test_the_fast_checks_of_100000_blocks_are_within_the_ci_budget`
@@ -3950,3 +4300,143 @@ which keeps the test stable on shared CI machines. It is not the budget of decis
 the plan: that budget is the measurement of `scripts/budget.py` on 10^6 blocks, made
 before each tag. The fast checks are the ones of task 8.3 (`timing.rasters` and the three
 gradient checks); the profile has no SAFE parameters because `pns.safe` is slow.
+
+### 2.12 Analysis bindings (`test_bindings.py`)
+
+These tests check `bindings.py`: `BINDINGS`, `gamma` and `unavailable`. They build a
+`RunContext` for `spin_echo_sequence()` and a target (`make_profile` and `safe_profile` of
+`test_run.py`). The analyses are the installed analyses of pulseq-analysis, or `FakeAnalysis`
+of `test_run.py`.
+
+#### `test_the_bindings_are_those_of_the_four_analyses_of_pulseq_analysis`
+
+**Checks:** `BINDINGS` has one binding for each installed analysis of pulseq-analysis. The
+binding of `seq.index` has no input, no model and no argument. The bindings of
+`gradient.limits` and `gradient.blocks` have no input and no model. The binding of
+`pns.safe.levels` has the model `pns.safe` and no input. A `Binding()` gives no argument.
+
+**How:** The test compares the keys of `BINDINGS` with `registry.analyses()`, and the fields of
+each binding with the expected values.
+
+**Assumptions:** A new analysis in pulseq-analysis needs a new binding or the test fails (the
+test shows it).
+
+#### `test_each_binding_gives_the_parameters_of_its_analysis`
+
+**Checks:** The keys of the arguments of each binding are the names in `spec.params` of its
+analysis.
+
+**How:** The test calls the function of each binding for a target with the SAFE parameters and
+compares the key sets.
+
+**Assumptions:** None.
+
+#### `test_the_bindings_of_the_gradient_analyses_give_the_gamma_of_the_target`
+
+**Checks:** For a target with `opts.gamma`, `gamma(ctx)` and the arguments of `gradient.limits`
+and `gradient.blocks` are that gamma.
+
+**How:** The test makes the context for a target with a gamma that is not the pypulseq default
+and compares the values.
+
+**Assumptions:** None.
+
+#### `test_the_gamma_of_a_sequence_object_with_the_limits_from_it_is_the_gamma_of_the_sequence`
+
+**Checks:** For a `Sequence` object whose gamma is not that of the profile, with
+`limits_source == "sequence object"`, `gamma(ctx)` and the arguments of both gradient bindings
+are the gamma of `seq.system` (decision P3). `ctx.analysis("gradient.limits")` is
+`gradient_limits(seq, gamma=<that gamma>)` and is not the value for the gamma of the profile.
+With the limits of the profile, the gamma is that of the profile.
+
+**How:** The test builds a sequence with one trapezoid and a gamma of 43 MHz/T, and a profile
+with 40 MHz/T. It compares the values and the two calls of `gradient_limits`.
+
+**Assumptions:** The gamma of the two systems differs, so that the comparison can tell them
+apart.
+
+#### `test_the_binding_of_pns_safe_levels_gives_the_safe_hardware_and_the_stimulation_threshold`
+
+**Checks:** The arguments of `pns.safe.levels` are `hardware` and `thresholds`. The hardware is
+the pair of `hw_from_dict` of the parameters of the model and the `name` of the model, and
+`thresholds` is `(PNS_LIMIT,)`, which is `(1.0,)`.
+
+**How:** The test calls the function of the binding and compares the three values.
+
+**Assumptions:** None.
+
+#### `test_the_label_of_the_safe_hardware_is_the_source_of_the_model_without_a_name`
+
+**Checks:** A model without `name` gives the label that is the source of the model
+(`sources["models.pns.safe"]`). The hardware is `hw_from_dict` of the parameters, with the name
+"unknown".
+
+**How:** The test removes the name from the parameters, sets the source to "x.asc" and compares
+the label and the hardware.
+
+**Assumptions:** None.
+
+#### `test_each_analysis_is_available_for_a_target_that_gives_its_values`
+
+**Checks:** `unavailable` gives `[]` for each of the four analyses and a target with the SAFE
+parameters (the rasters of a hand-made context come from the sequence object).
+
+**How:** The test calls `unavailable` for each installed analysis.
+
+**Assumptions:** None.
+
+#### `test_a_target_without_the_model_makes_pns_safe_levels_unavailable`
+
+**Checks:** For a target without `[models.pns.safe]`, `unavailable` gives exactly one reason for
+`pns.safe.levels`, with the analysis ID, the target name and the missing model. The other three
+analyses are available.
+
+**How:** The test compares the list with the expected text.
+
+**Assumptions:** None.
+
+#### `test_an_input_that_the_target_does_not_give_is_a_reason_and_one_that_it_gives_is_not`
+
+**Checks:** For a binding with the inputs `opts.max_grad` and `opts.max_slew` and a model, the
+reason names the input and the model that the target does not give and not the input that it
+gives. A target that gives all of them has no reason. The limits of a sequence object give
+both inputs.
+
+**How:** The test adds a binding to `BINDINGS` with monkeypatch, for a `FakeAnalysis`, and calls
+`unavailable` for three contexts.
+
+**Assumptions:** No binding of this package has an input, so the test uses a test binding.
+
+#### `test_a_raster_that_is_a_pypulseq_default_is_a_reason_for_the_analyses_that_use_it`
+
+**Checks:** A raster with the source "pypulseq default" is a reason for an analysis that has it
+in `spec.rasters`, with the text of the rule of the checks (the file, the raster and the
+`rasters.` path of the target) and the analysis ID. A raster from the file, from the target or
+for a raster that the analysis does not use is not a reason. The gradient analyses and
+`pns.safe.levels` use `GradientRasterTime`; `seq.index` uses no raster.
+
+**How:** The test makes contexts with a `raster_sources` dict and calls `unavailable` for the
+installed analyses and for a `FakeAnalysis` with the rasters `GradientRasterTime` and
+`AdcRasterTime`.
+
+**Assumptions:** None.
+
+#### `test_an_analysis_without_a_binding_is_unavailable_only_when_it_has_parameters`
+
+**Checks:** `unavailable` gives `[]` for an analysis that has no binding and no parameter. For
+one with parameters, it gives one reason that names the analysis and its parameters (decision
+L6).
+
+**How:** The test calls `unavailable` for two `FakeAnalysis`.
+
+**Assumptions:** None.
+
+#### `test_each_reason_that_applies_is_in_the_list`
+
+**Checks:** A target without the model and a raster that is a pypulseq default give two reasons
+for `pns.safe.levels`, in this order (the model, then the raster), and each reason names the
+analysis ID.
+
+**How:** The test makes the context and checks the length and the text of the two reasons.
+
+**Assumptions:** None.

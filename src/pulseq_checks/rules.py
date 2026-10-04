@@ -8,11 +8,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from . import registry
+from .bindings import BINDINGS, unavailable
 from .profile import RASTER_OPTS, HardwareLimits
 from .results import Result, State
 
 if TYPE_CHECKING:
     import pypulseq as pp
+    from pulseq_analysis.analyses import Analysis
 
     from .profile import TargetProfile
 
@@ -43,7 +46,10 @@ class CheckSpec:
     "RadiofrequencyRasterTime", "AdcRasterTime", "BlockDurationRaster"). The run function gives
     "not evaluated" when the file does not declare one of them and the target does not give
     it. `promise` says what a pass and a fail of the check mean for the user; each check of
-    this package gives one, and a plugin can leave it None."""
+    this package gives one, and a plugin can leave it None. `analyses` are the IDs of the
+    analyses of pulseq-analysis that the check gets with `RunContext.analysis`. The run
+    function gives "not evaluated" when one of them is not available for the target
+    (`bindings.unavailable`)."""
 
     id: str
     version: int
@@ -60,6 +66,7 @@ class CheckSpec:
     findings: str | None = None
     rasters: tuple[str, ...] = ()
     promise: CheckPromise | None = None
+    analyses: tuple[str, ...] = ()
 
 
 def spec_url(spec: CheckSpec) -> str:
@@ -83,7 +90,11 @@ class RunContext:
     "sequence object" (the sequence is a `pp.Sequence` object, not a file) or "pypulseq
     default" (neither the file nor the profile gives it). The default is "sequence object" for
     all four rasters: a context that is made by hand has a sequence object, and no rule is
-    "not evaluated" for it."""
+    "not evaluated" for it.
+
+    `analyses` are the installed analyses by ID (`registry.analyses()`). The run function
+    gives the dict that it loaded one time for all targets. A context that is made by hand
+    loads them in its first call of `analysis`."""
 
     def __init__(
         self,
@@ -93,6 +104,7 @@ class RunContext:
         limits_source: str = "profile",
         hardware_limits: HardwareLimits | None = None,
         raster_sources: Mapping[str, str] | None = None,
+        analyses: Mapping[str, Analysis] | None = None,
     ) -> None:
         self.sequence = sequence
         self.profile = profile
@@ -103,12 +115,43 @@ class RunContext:
             if raster_sources is None
             else dict(raster_sources)
         )
+        self._installed_analyses = analyses
         self._measurements: dict[str, Any] = {}
+        # The value of `compute` of each analysis, or the exception that it raised.
+        self._analyses: dict[str, Any] = {}
+
+    def analysis(self, analysis_id: str) -> Any:
+        """The value of `compute` of the analysis `analysis_id` for this target, with the
+        keyword arguments of its binding (`bindings.BINDINGS`). `compute` runs one time for
+        each ID in this context. The value, or the exception that `compute` raised, is kept:
+        a second call gives the value, or raises the same exception again.
+
+        Raises `LookupError`, with the reason, when the analysis is not installed or is not
+        available for the target (`bindings.unavailable`)."""
+        if analysis_id not in self._analyses:
+            if self._installed_analyses is None:
+                self._installed_analyses = registry.analyses()
+            analysis = self._installed_analyses.get(analysis_id)
+            if analysis is None:
+                raise LookupError(f"the analysis {analysis_id!r} is not installed")
+            reasons = unavailable(self, analysis)
+            if reasons:
+                raise LookupError("; ".join(reasons))
+            binding = BINDINGS.get(analysis_id)
+            try:
+                arguments = {} if binding is None else binding.arguments(self)
+                self._analyses[analysis_id] = analysis.compute(self.sequence, **arguments)
+            except Exception as e:  # noqa: BLE001 (kept, and raised again for each caller)
+                self._analyses[analysis_id] = e
+        kept = self._analyses[analysis_id]
+        if isinstance(kept, Exception):
+            raise kept
+        return kept
 
     def measure(self, name: str, fn: Callable[[pp.Sequence], Any]) -> Any:
         """`fn(self.sequence)`, calculated one time for each `name` in this context and kept
-        for the other rules of this target. The names of this package are "index",
-        "gradient_limits", "gradient_blocks" and "pns_levels"."""
+        for the other rules of this target. It is for the measurements of a plugin. The analyses
+        of pulseq-analysis are in `analysis`."""
         if name not in self._measurements:
             self._measurements[name] = fn(self.sequence)
         return self._measurements[name]
@@ -136,10 +179,10 @@ class RunContext:
 
 class CheckRule(Protocol):
     """A check: its specification, and `run`, which returns its result for one target (made
-    with `ctx.result`). The run function gives "not evaluated" before `run` when an input or
-    a model is missing, and "error" when `run` raises or when the result is not valid: its
-    findings are not a tuple of `Finding`, or its `findings_omitted` is not an `int` of 0 or
-    more (plan check-findings, section 4.4)."""
+    with `ctx.result`). The run function gives "not evaluated" before `run` when an input, a
+    model or an analysis is missing, and "error" when `run` raises or when the result is not
+    valid: its findings are not a tuple of `Finding`, or its `findings_omitted` is not an `int`
+    of 0 or more (plan check-findings, section 4.4)."""
 
     spec: CheckSpec
 

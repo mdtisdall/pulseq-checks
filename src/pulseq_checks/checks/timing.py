@@ -8,7 +8,7 @@ import math
 from typing import Any
 
 import numpy as np
-from pulseq_analysis.seq_index import block_cache_off, sequence_index
+from pulseq_analysis.seq_index import block_cache_off
 from pypulseq.check_timing import error_messages
 
 from ..profile import RASTER_OPTS
@@ -312,6 +312,7 @@ class _Pypulseq:
         cost="slow",
         pypulseq="Sequence.check_timing",
         url=None,
+        analyses=("seq.index",),
         findings=(
             "One finding for each error that check_timing gives, in the order of "
             "check_timing (the play order of the blocks). The code is the error type of "
@@ -368,7 +369,7 @@ class _Pypulseq:
             _, errors = seq.check_timing()
         if not errors:
             return ctx.result(self.spec, State.PASS, value=0.0, limit=0.0)
-        index = ctx.measure("index", sequence_index)
+        index = ctx.analysis("seq.index")
         # One map for all errors: a sequence of 10^6 blocks can give 4 x 10^5 errors.
         starts = dict(zip(index.block_id.tolist(), index.start_s.tolist(), strict=True))
         findings = tuple(

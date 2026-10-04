@@ -1,6 +1,6 @@
 """The entry-point groups of pulseq-checks (decision 7 of the plan, design section 5.7):
 profile readers, models and check rules. The checks of this package use the same group as
-a plugin.
+a plugin. `analyses()` gives the analyses of pulseq-analysis, which has its own group.
 
 Interface stub (plan section 4.9): the names and the signatures are fixed. Task 3.3 writes
 the bodies. Callers use `registry.<function>()` (not `from .registry import ...`), so that
@@ -12,9 +12,13 @@ import importlib.metadata
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pulseq_analysis import analyses as analysis_registry
+
 from .results import CheckRunError
 
 if TYPE_CHECKING:
+    from pulseq_analysis.analyses import Analysis
+
     from .rules import CheckRule
 
 PROFILE_READERS = "pulseq_checks.profile_readers"
@@ -82,6 +86,15 @@ def check_rules() -> dict[str, CheckRule]:
             ) from e
         _add(found, check_id, rule, ep, f"the check ID {check_id!r}")
     return {check_id: rule for check_id, (rule, _) in found.items()}
+
+
+def analyses() -> dict[str, Analysis]:
+    """The installed analyses of pulseq-analysis, by `spec.id` (`analyses.registry()`). Its
+    `RegistryError` is a `RegistryError` of this module, so it is an error of the run."""
+    try:
+        return analysis_registry.registry()
+    except analysis_registry.RegistryError as e:
+        raise RegistryError(str(e)) from e
 
 
 def _package(ep: Any) -> str:
