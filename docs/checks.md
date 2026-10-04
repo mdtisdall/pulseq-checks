@@ -21,6 +21,18 @@ it again, run `nix develop --command uv run python scripts/check_docs.py`.
 
 Peak gradient amplitude under any orientation
 
+**A pass promises:**
+
+The magnitude |G| of the gradient vector of the file is at or below opts.max_grad of the target, within the tolerance, at each time of the sequence. Thus for each rotation of the logical axes onto the physical axes of the scanner, the amplitude of each physical axis is at or below the limit.
+
+**A fail means:**
+
+|G| is above opts.max_grad at some time. Thus some rotation gives a physical axis above the limit. It does not mean that the rotation of the real scan does: a scan with no rotation can still pass gradient.amplitude.axis. The findings give each block above the limit.
+
+**Not promised:**
+
+Which rotations are safe after a fail. The slew and the PNS under a rotation. The waveform that the scanner plays, when its interpreter makes it in another way than the check: the check measures the gradient waveform of the file, piecewise linear between its corner points, as pypulseq defines it. When the GradientRasterTime or the BlockDurationRaster of the file differs from the raster of the target (timing.rasters fails), the interpreter makes the waveform on the scanner in a way that the check does not know, and the value describes the waveform of the file only.
+
 **Version:** 1
 
 **Cost class:** fast
@@ -46,6 +58,18 @@ Peak gradient amplitude under any orientation
 ## `gradient.amplitude.axis`
 
 Peak gradient amplitude of each logical axis
+
+**A pass promises:**
+
+On each logical axis x, y and z, the absolute amplitude of the gradient waveform of the file is at or below opts.max_grad of the target, within the tolerance, at each time of the sequence.
+
+**A fail means:**
+
+On at least one logical axis, the amplitude is above opts.max_grad at some time. The findings give each block and axis above the limit.
+
+**Not promised:**
+
+The amplitude on the physical axes of the scanner when the scan rotates the logical axes (an oblique slice): gradient.amplitude.any-orientation covers each rotation. The waveform that the scanner plays, when its interpreter makes it in another way than the check: the check measures the gradient waveform of the file, piecewise linear between its corner points, as pypulseq defines it. When the GradientRasterTime or the BlockDurationRaster of the file differs from the raster of the target (timing.rasters fails), the interpreter makes the waveform on the scanner in a way that the check does not know, and the value describes the waveform of the file only.
 
 **Version:** 1
 
@@ -73,6 +97,18 @@ Peak gradient amplitude of each logical axis
 
 Peak gradient slew rate of each logical axis
 
+**A pass promises:**
+
+On each logical axis x, y and z, the slew rate of the gradient waveform of the file is at or below opts.max_slew of the target, within the tolerance: the slope of each straight segment between two corner points, and each step at a block junction divided by the gradient raster of the file.
+
+**A fail means:**
+
+On at least one logical axis, a segment or a junction step is above opts.max_slew. The findings give each block and axis above the limit, a segment and a step separately.
+
+**Not promised:**
+
+The slew on the physical axes of the scanner when the scan rotates the logical axes: a rotation can put the slews of two or three logical axes on one physical axis, so a physical axis can have a larger slew than each logical axis. The waveform that the scanner plays, when its interpreter makes it in another way than the check: the check measures the gradient waveform of the file, piecewise linear between its corner points, as pypulseq defines it. When the GradientRasterTime or the BlockDurationRaster of the file differs from the raster of the target (timing.rasters fails), the interpreter makes the waveform on the scanner in a way that the check does not know, and the value describes the waveform of the file only.
+
 **Version:** 1
 
 **Cost class:** fast
@@ -98,6 +134,18 @@ Peak gradient slew rate of each logical axis
 ## `pns.safe`
 
 Peripheral nerve stimulation, SAFE model
+
+**A pass promises:**
+
+The SAFE model of pypulseq, with the SAFE parameters of the target, predicts a peak PNS below 100 % of the stimulation limit for the gradient waveform of the file, with the logical axes x, y and z of the file as the physical axes of the coil.
+
+**A fail means:**
+
+The model predicts a PNS at or above 100 % of the stimulation limit at some time. The findings give each interval at or above 100 %.
+
+**Not promised:**
+
+That a subject feels no stimulation: SAFE is a model, and its prediction is only as good as the SAFE parameters of the target. The PNS when the scan rotates the logical axes: the SAFE parameters are different for each physical axis, so a rotation changes the PNS. The waveform that the scanner plays, when its interpreter makes it in another way than the check: the check gives the SAFE model the gradient waveform of the file, sampled at the gradient raster of the file. When the GradientRasterTime or the BlockDurationRaster of the file differs from the raster of the target (timing.rasters fails), the interpreter makes the waveform on the scanner in a way that the check does not know, and the value describes the waveform of the file only.
 
 **Version:** 1
 
@@ -125,6 +173,18 @@ Peripheral nerve stimulation, SAFE model
 
 Timing check of pypulseq with the system of the target
 
+**A pass promises:**
+
+check_timing of pypulseq gives no error for the file, read with the Opts of the target. That is: each block duration is on the block duration raster of the target; the delay of each event, and the rise, flat and fall time of each trapezoid, are on the raster of the target for that event; each ADC dwell is on the ADC raster; no delay is negative; each RF pulse starts at or after the RF dead time and ends at least the RF ringdown time before the end of its block; each ADC starts at or after the ADC dead time and ends at least the ADC dead time before the end of its block; each stored block duration is the duration of the content of its block; and the soft delays are consistent.
+
+**A fail means:**
+
+check_timing gives one or more errors. The findings give each error, with its block.
+
+**Not promised:**
+
+The times of the samples and the corner points of arbitrary gradients and extended trapezoids, and the time points of RF shapes: check_timing does not check them. That the rasters of the file are the rasters of the target: timing.rasters checks that. A timing rule of the target that check_timing does not have.
+
 **Version:** 1
 
 **Cost class:** slow
@@ -150,6 +210,18 @@ Timing check of pypulseq with the system of the target
 ## `timing.rasters`
 
 Rasters of the file against the rasters of the target
+
+**A pass promises:**
+
+Each of the four rasters that the file declares in [DEFINITIONS] (GradientRasterTime, RadiofrequencyRasterTime, AdcRasterTime and BlockDurationRaster) equals the raster of the target, within the tolerance.
+
+**A fail means:**
+
+At least one raster that the file declares differs from the raster of the target, coarser or finer. The findings give each such raster with both values. The check does not know whether the file plays correctly on the target: the interpreter must make new samples for the shapes, and the Pulseq specification does not say how.
+
+**Not promised:**
+
+That the times of the events of the file are on these rasters: timing.pypulseq checks the times that are fields of the events. That the file plays correctly on the target: the check compares the declared rasters only.
 
 **Version:** 1
 

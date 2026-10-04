@@ -1844,6 +1844,31 @@ and makes `RunContext(sequence, profile)`.
 **Assumptions:** The positional order of the earlier fields does not change. A rule that is
 called directly (without `run_checks`) is not checked for rasters: only the run function does it.
 
+#### `test_a_spec_without_a_promise_runs_as_before`
+
+**Checks:** A `CheckSpec` that a plugin makes with the fields up to `rasters` by position has
+`promise is None` and runs as before.
+
+**How:** The test makes a `CheckSpec` with 14 positional arguments, checks that its `promise` is
+`None`, and runs it with `run_checks` on a synthetic sequence: the result is a pass.
+
+**Assumptions:** The positional order of the earlier fields does not change. The run function
+does not read `promise`; the test does not check how a plugin documents a check without one.
+
+#### `test_each_check_of_this_package_gives_a_promise_with_three_texts`
+
+**Checks:** Each check of the distribution `pulseq-checks` has a `CheckPromise` in its
+specification, with a text that is not empty for what a pass guarantees, what a fail means and
+what the check does not promise.
+
+**How:** The test loads the check entry points of the distribution `pulseq-checks`, compares
+their IDs with the six checks of version 1, and checks the type of `spec.promise` and that each
+of its three texts is a string that is not empty.
+
+**Assumptions:** The test does not check that a text is true. `scripts/check_docs.py` shows the
+texts in `docs/checks.md`, and the review of a change checks them. A new check of this package
+must be added to the list of IDs.
+
 #### `test_check_rules_are_keyed_by_spec_id`
 
 **Checks:** `registry.check_rules()` gives a dict of the loaded rules by `spec.id`, in any

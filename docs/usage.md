@@ -977,6 +977,7 @@ same.
 | `url` | The link to the documentation of the check. A plugin sets it. With `None`, a result links to the heading of the ID in the `checks.md` of this package, which is wrong for a plugin. |
 | `findings` | A text, or `None` (the default). A check that gives findings documents them here: what one finding is, its codes, its location, the keys of `data` and the order of the findings. A check that gives none leaves it `None`. |
 | `rasters` | A tuple of the raster names that the measurement of the check uses (`"GradientRasterTime"`, `"RadiofrequencyRasterTime"`, `"AdcRasterTime"`, `"BlockDurationRaster"`). The default is `()`. Put it after `findings` when you give the fields by position. |
+| `promise` | A `CheckPromise`, or `None` (the default). It says what the check promises to a user of its result: `on_pass`, what a pass guarantees; `on_fail`, what a fail means; and `not_promised`, what the check does not promise, also with a pass. [`checks.md`](checks.md) shows it first for each check, and each check of this package gives one. Give one for a plugin check too. Put it after `rasters` when you give the fields by position. |
 
 The run function does these steps for each target:
 
@@ -1035,7 +1036,7 @@ longest block, and one finding for each block that is too long.
 ```python
 import numpy as np
 
-from pulseq_checks import CheckSpec, Finding, Location, Result, RunContext, State
+from pulseq_checks import CheckPromise, CheckSpec, Finding, Location, Result, RunContext, State
 from pulseq_analysis.seq_index import sequence_index
 
 MAX_BLOCK_S = 0.1
@@ -1058,6 +1059,11 @@ class _BlockDuration:
             "One finding for each block that is longer than 0.1 s, in the play order of "
             "the blocks. The code is BLOCK_TOO_LONG. The location is the block and its "
             "start time. data has duration_s: the duration of the block, in seconds."
+        ),
+        promise=CheckPromise(
+            on_pass="Each block of the sequence lasts at most 0.1 s.",
+            on_fail="At least one block lasts more than 0.1 s. The findings give each one.",
+            not_promised="Anything about the events in the blocks.",
         ),
     )
 
@@ -1225,7 +1231,12 @@ def target_pns(ctx):
   the Python function has `limits_from_sequence`, and only for a `Sequence`
   object.
 - **No convention checks** (handedness, axis mapping), and no worst-case slew
-  under rotation. They come later.
+  or PNS under rotation. They come later. `gradient.amplitude.axis`,
+  `gradient.slew.axis` and `pns.safe` measure the logical axes of the file, so
+  what they promise holds for a scan with no rotation (see "Not promised" in
+  [`checks.md`](checks.md)). `gradient.amplitude.any-orientation` covers each
+  rotation for the amplitude. The worst case of the slew and of the PNS is an
+  item of [`TODO.md`](../TODO.md).
 - **No JUnit output.**
 - **The pypulseq fork.** This package needs pypulseq 1.5.0.post1 with four
   commits that are not in a release: the SAFE PNS filter as a recursion,

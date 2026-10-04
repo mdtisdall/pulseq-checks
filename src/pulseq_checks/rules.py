@@ -21,6 +21,17 @@ DOCS_URL = "https://github.com/mdtisdall/pulseq-checks/blob/main/docs/checks.md"
 
 
 @dataclass(frozen=True)
+class CheckPromise:
+    """What a check promises (design section 5.4): `on_pass`, what a pass guarantees;
+    `on_fail`, what a fail means; and `not_promised`, what the check does not promise, also
+    with a pass. Each is a text for a user of the result."""
+
+    on_pass: str
+    on_fail: str
+    not_promised: str
+
+
+@dataclass(frozen=True)
 class CheckSpec:
     """The specification of a check (design section 5.4). `inputs` are the profile value
     paths that the check needs (`TargetProfile.sources` keys, for example "opts.max_grad"),
@@ -31,7 +42,8 @@ class CheckSpec:
     `rasters` are the raster names that the measurement of the check uses ("GradientRasterTime",
     "RadiofrequencyRasterTime", "AdcRasterTime", "BlockDurationRaster"). The run function gives
     "not evaluated" when the file does not declare one of them and the target does not give
-    it."""
+    it. `promise` says what a pass and a fail of the check mean for the user; each check of
+    this package gives one, and a plugin can leave it None."""
 
     id: str
     version: int
@@ -47,6 +59,7 @@ class CheckSpec:
     url: str | None = None
     findings: str | None = None
     rasters: tuple[str, ...] = ()
+    promise: CheckPromise | None = None
 
 
 def spec_url(spec: CheckSpec) -> str:

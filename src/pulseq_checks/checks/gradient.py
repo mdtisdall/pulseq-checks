@@ -25,7 +25,7 @@ from pulseq_analysis.grad_limits import (
 
 from ..profile import HardwareLimits
 from ..results import Finding, Location, Result, State
-from ..rules import CheckSpec, RunContext
+from ..rules import CheckPromise, CheckSpec, RunContext
 
 # The rule of the gradient limits card of pulseq-reports (fact 8 of the plan): a value passes
 # when value <= limit * (1 + _LIMIT_TOLERANCE).
@@ -69,6 +69,16 @@ _FINDINGS_FOR_FAIL = (
     "largest value of the findings is the value of the result."
 )
 _RASTERS = ("GradientRasterTime", "BlockDurationRaster")
+# What a gradient check does not promise about the waveform on the scanner.
+_NOT_PROMISED_WAVEFORM = (
+    "The waveform that the scanner plays, when its interpreter makes it in another way than the "
+    "check: the check measures the gradient waveform of the file, piecewise linear between its "
+    "corner points, as pypulseq defines it. When the GradientRasterTime or the "
+    "BlockDurationRaster of the file differs from the raster of the target (timing.rasters "
+    "fails), the interpreter "
+    "makes the waveform on the scanner in a way that the check does not know, and the value "
+    "describes the waveform of the file only."
+)
 _NOT_EVALUATED_RASTERS = (
     'The check is "not evaluated" when the file does not declare GradientRasterTime or '
     "BlockDurationRaster and the target does not give that raster (rasters.GradientRasterTime "
@@ -266,6 +276,22 @@ class _AmplitudeAxis(_GradientCheck):
             'mT/m". ' + _FINDINGS_FOR_FAIL
         ),
         rasters=_RASTERS,
+        promise=CheckPromise(
+            on_pass=(
+                "On each logical axis x, y and z, the absolute amplitude of the gradient waveform "
+                "of the file is at or below opts.max_grad of the target, within the tolerance, at "
+                "each time of the sequence."
+            ),
+            on_fail=(
+                "On at least one logical axis, the amplitude is above opts.max_grad at some time. "
+                "The findings give each block and axis above the limit."
+            ),
+            not_promised=(
+                "The amplitude on the physical axes of the scanner when the scan rotates the "
+                "logical axes (an oblique slice): gradient.amplitude.any-orientation covers each "
+                "rotation. " + _NOT_PROMISED_WAVEFORM
+            ),
+        ),
     )
     unit = "mT/m"
 
@@ -379,6 +405,25 @@ class _SlewAxis(_GradientCheck):
             + _FINDINGS_FOR_FAIL
         ),
         rasters=_RASTERS,
+        promise=CheckPromise(
+            on_pass=(
+                "On each logical axis x, y and z, the slew rate of the gradient waveform of the "
+                "file is at or below opts.max_slew of the target, within the tolerance: the slope "
+                "of each straight segment between two corner points, and each step at a block "
+                "junction divided by the gradient raster of the file."
+            ),
+            on_fail=(
+                "On at least one logical axis, a segment or a junction step is above "
+                "opts.max_slew. The findings give each block and axis above the limit, a segment "
+                "and a step separately."
+            ),
+            not_promised=(
+                "The slew on the physical axes of the scanner when the scan rotates the logical "
+                "axes: a rotation can put the slews of two or three logical axes on one physical "
+                "axis, so a physical axis can have a larger slew than each logical axis. "
+                + _NOT_PROMISED_WAVEFORM
+            ),
+        ),
     )
     unit = "T/m/s"
 
@@ -483,6 +528,24 @@ class _AmplitudeAnyOrientation(_GradientCheck):
             + _FINDINGS_FOR_FAIL
         ),
         rasters=_RASTERS,
+        promise=CheckPromise(
+            on_pass=(
+                "The magnitude |G| of the gradient vector of the file is at or below opts.max_grad"
+                " of the target, within the tolerance, at each time of the sequence. Thus for each"
+                " rotation of the logical axes onto the physical axes of the scanner, the "
+                "amplitude of each physical axis is at or below the limit."
+            ),
+            on_fail=(
+                "|G| is above opts.max_grad at some time. Thus some rotation gives a physical axis"
+                " above the limit. It does not mean that the rotation of the real scan does: a "
+                "scan with no rotation can still pass gradient.amplitude.axis. The findings give "
+                "each block above the limit."
+            ),
+            not_promised=(
+                "Which rotations are safe after a fail. The slew and the PNS under a rotation. "
+                + _NOT_PROMISED_WAVEFORM
+            ),
+        ),
     )
     unit = "mT/m"
 

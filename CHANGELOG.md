@@ -5,6 +5,16 @@ Each version of `pulseq-checks` has an entry here. The version numbers follow
 
 ## Unreleased
 
+### Added
+
+- **`CheckSpec.promise`**, a `CheckPromise` with three texts: what a pass of
+  the check guarantees (`on_pass`), what a fail means (`on_fail`) and what the
+  check does not promise (`not_promised`). Each check of this package gives
+  one, and `docs/checks.md` shows it first for each check. It is the last
+  field of `CheckSpec`, with the default `None`, so a plugin that gives the
+  fields by position works as before. The rules of the checks do not change,
+  and each specification stays version 1.
+
 ### Changed
 
 - **The measurement modules moved to the package pulseq-analysis**
