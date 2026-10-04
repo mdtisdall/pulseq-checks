@@ -3,6 +3,22 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
+## Unreleased
+
+### Changed
+
+- **pulseq-analysis `0.1.0rc3`** in place of `0.1.0rc2`. A series object of
+  the JSON result has the keys `name`, `kind`, `unit`, `coord_unit`,
+  `coord_start`, `coord_step`, `coord_end`, `meta` and `arrays`: the new
+  `coord_unit` (`"s"` for the series of `pns.safe.levels`), and
+  `coord_start`, `coord_step` and `coord_end` in place of `t0_s`, `step_s`
+  and `end_s`. The arrays of a `RUNS` series are `start` and `end` in place
+  of `start_s` and `end_s`, and the array of a `POINTS` series is `coord` in
+  place of `time_s`. Thus this version cannot read a JSON result of
+  `0.1.0rc3` that has a series, and `0.1.0rc3` cannot read a JSON result of
+  this version that has a series. The format stays 1, and the version of
+  `pns.safe.levels` stays 1. The results of the checks do not change.
+
 ## 0.1.0rc3 (2026-10-04)
 
 The third release candidate. The measurement modules are in their own

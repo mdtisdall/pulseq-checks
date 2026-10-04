@@ -600,8 +600,8 @@ wheels = [
 
 [[package]]
 name = "pulseq-analysis"
-version = "0.1.0rc2"
-source = { git = "https://github.com/mdtisdall/pulseq-analysis?rev=v0.1.0rc2#9f65863fcabfe98a2ce029099402ba331497f331" }
+version = "0.1.0rc3"
+source = { git = "https://github.com/mdtisdall/pulseq-analysis?rev=v0.1.0rc3#62dc9e451dbdfa2cb2bec93dad5d6940d7e86939" }
 dependencies = [
     { name = "numpy" },
     { name = "pypulseq" },
@@ -627,7 +627,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy" },
-    { name = "pulseq-analysis", git = "https://github.com/mdtisdall/pulseq-analysis?rev=v0.1.0rc2" },
+    { name = "pulseq-analysis", git = "https://github.com/mdtisdall/pulseq-analysis?rev=v0.1.0rc3" },
     { name = "pypulseq", git = "https://github.com/mdtisdall/pypulseq?rev=a74ab06e51ca09707ff54837cf5ff652f6e69e94" },
     { name = "scipy" },
 ]
