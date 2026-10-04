@@ -798,7 +798,7 @@ target. It is not a check result: `exit_status()` does not use it.
 
 | State | The value | When |
 |---|---|---|
-| done | `AnalysisState.DONE`, `"done"` | The analysis is available for the target, and `compute` and `to_series` returned. `series` can be `()`: `seq.index`, `gradient.limits` and `gradient.blocks` have nothing for JSON, and `pns.safe.levels` has nothing for a sequence with no gradient event. |
+| done | `AnalysisState.DONE`, `"done"` | The analysis is available for the target, and `compute` and `to_series` returned. `series` can be `()`: `seq.index`, `gradient.limits` and `gradient.blocks` have nothing for JSON, and `pns.safe.levels` and `gradient.spectrum` have nothing for a sequence with no gradient event. |
 | not evaluated | `AnalysisState.NOT_EVALUATED`, `"not evaluated"` | The analysis is not available for the target. The target does not give a model or an input of the [binding](#the-analyses-of-this-package); or the file does not declare a raster that the analysis uses and the target does not give it; or the analysis has parameters and pulseq-checks has no binding for it. The reason names the analysis and what is missing. |
 | error | `AnalysisState.ERROR`, `"error"` | `compute` or `to_series` raised an exception (the reason is `<exception type>: <message>`, for example `NotImplementedError` for a file with the rotation extension), or `to_series` did not return a tuple of `Series`. The run goes on. |
 
@@ -806,10 +806,11 @@ An analysis result never stops the run and never changes the exit status.
 
 A `Series` is the form of the values of an analysis in a matrix and in the JSON
 result. [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#5-series-values-for-json)
 gives its fields, its four kinds (`SAMPLES`, `ENVELOPE`, `POINTS` and `RUNS`) and
-its arrays. The series of `pns.safe.levels` are in [its section
-6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#6-analyses-the-analyses-and-their-registry).
+its arrays. The series of `pns.safe.levels` and `gradient.spectrum` are in
+[its section
+6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#6-analyses-the-analyses-and-their-registry).
 
 ```python
 from pulseq_checks import read_profile, run_checks
@@ -992,7 +993,7 @@ and the little-endian bytes of the array, gzipped and base64-encoded. A float
 that is not finite in an array is in the bytes, and in `meta` or in a
 coordinate field it is the string `"inf"`, `"-inf"` or `"nan"`.
 [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#5-series-values-for-json)
 gives the form of a series and the encoding of an array, and
 `Series.from_obj` and `decode_array` read them. A tool that is not in Python
 decodes `data` with base64, then gzip, then the little-endian numbers of
@@ -1054,6 +1055,41 @@ length 0:
         "num_samples": {"dtype": "int64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "peak": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "peak_time_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."}
+      }
+    }
+  ]
+}
+```
+
+With `--analysis gradient.spectrum`, the same command has this item. The
+series `gradient_spectrum` is `SAMPLES`: the spectrum of the gradient
+waveform, from 0 Hz up to `max_frequency_hz` in steps of `coord_step` Hz, in
+Hz/m/sqrt(Hz). `value` is the root-sum-of-squares of the three axes, and
+`x`, `y` and `z` are the axes. `meta` has the arguments of the calculation,
+the defaults of pypulseq:
+
+```json
+{
+  "id": "gradient.spectrum",
+  "version": 1,
+  "target": "Prisma AS82",
+  "state": "done",
+  "reason": null,
+  "series": [
+    {
+      "name": "gradient_spectrum",
+      "kind": "samples",
+      "unit": "Hz/m/sqrt(Hz)",
+      "coord_unit": "Hz",
+      "coord_start": 0.0,
+      "coord_step": 6.666666666666666,
+      "coord_end": null,
+      "meta": {"max_frequency_hz": 2000.0, "window_s": 0.05, "frequency_oversampling": 3.0},
+      "arrays": {
+        "value": {"dtype": "float64", "length": 301, "data": "H4sIAAAAAAAA/w2TeTwU..."},
+        "x": {"dtype": "float64", "length": 301, "data": "H4sIAAAAAAAA/w2VeTwU..."},
+        "y": {"dtype": "float64", "length": 301, "data": "H4sIAAAAAAAA/xVVaTwU..."},
+        "z": {"dtype": "float64", "length": 301, "data": "H4sIAAAAAAAA/+3BMQEA..."}
       }
     }
   ]
@@ -1256,9 +1292,11 @@ it uses in `CheckSpec.analyses`.
   value from the same context, so a rule and a requested analysis share one
   compute.
 
-[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#6-analyses-the-analyses-and-their-registry)
+[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#6-analyses-the-analyses-and-their-registry)
 gives the registry of analyses, and the fields of each value are in [its
-sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#1-seq_index-the-block-table).
+sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#1-seq_index-the-block-table)
+and [its section
+7](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#7-grad_spectrum-the-gradient-spectrum).
 
 ### The analyses of this package
 
@@ -1280,6 +1318,14 @@ The bindings of version 1 are in `pulseq_checks.bindings.BINDINGS`:
   of the model if it has no name. `PNS_LIMIT` is in `pulseq_analysis.pns_levels`.
   The analysis also uses the rasters `GradientRasterTime` and
   `BlockDurationRaster`.
+- `gradient.spectrum` (the gradient spectrum of the whole sequence,
+  `gradient_spectrum_for`) has no binding, because it has no parameters and
+  takes no value of the target. It is available when the file or the target
+  gives `GradientRasterTime` and `BlockDurationRaster`, and it uses the
+  defaults of pypulseq (`max_frequency_hz=2000.0`, `window_s=0.05`,
+  `frequency_oversampling=3.0`). Its values are in Hz/m/sqrt(Hz), with no
+  gamma: multiply them by `1e3 / gamma` (gamma in Hz/T) to get
+  mT/m/sqrt(Hz).
 - An analysis that has no binding here (for example the analysis of another
   package) is available only when it has no parameters. Then `compute` gets
   no argument. With parameters it is not available, with the reason that
@@ -1438,7 +1484,7 @@ pulseq-analysis. It is a dependency of pulseq-checks. A check gets a value
 through an analysis of pulseq-analysis (`ctx.analysis`, [section
 7](#using-an-analysis)). A plugin can use the modules too, and pulseq-reports
 uses them for its plots. The [usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md)
 gives the interface of the modules: the names, the fields of each value, the
 units and the rules for the times and the block IDs.
 
@@ -1452,7 +1498,8 @@ These rules are about the checks:
 - **Rasters.** The gradient and PNS measurements use the `GradientRasterTime`
   and the `BlockDurationRaster` of the sequence. A check that uses them lists
   both in `CheckSpec.rasters`, as the checks of this package do. The analyses
-  `gradient.limits`, `gradient.blocks` and `pns.safe.levels` also use them.
+  `gradient.limits`, `gradient.blocks`, `gradient.spectrum` and
+  `pns.safe.levels` also use them.
   Then the run function gives "not evaluated" when neither the file nor the
   target gives a raster.
 - **Gamma.** The measurements have a default gamma. The binding of an analysis

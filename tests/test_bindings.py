@@ -24,8 +24,10 @@ def pns_context(**kwargs):
     return RunContext(spin_echo_sequence(), safe_profile(), **kwargs)
 
 
-def test_the_bindings_are_those_of_the_four_analyses_of_pulseq_analysis():
-    assert set(BINDINGS) == set(registry.analyses())
+def test_each_analysis_of_pulseq_analysis_but_gradient_spectrum_has_a_binding():
+    analyses = registry.analyses()
+    assert set(BINDINGS) == set(analyses) - {"gradient.spectrum"}
+    assert analyses["gradient.spectrum"].spec.params == ()
     assert BINDINGS["seq.index"] == Binding()
     assert BINDINGS["gradient.limits"].inputs == ()
     assert BINDINGS["gradient.limits"].models == ()
@@ -39,8 +41,9 @@ def test_the_bindings_are_those_of_the_four_analyses_of_pulseq_analysis():
 
 def test_each_binding_gives_the_parameters_of_its_analysis():
     ctx = pns_context()
-    for analysis_id, analysis in registry.analyses().items():
-        assert set(BINDINGS[analysis_id].arguments(ctx)) == set(analysis.spec.params), analysis_id
+    analyses = registry.analyses()
+    for analysis_id, binding in BINDINGS.items():
+        assert set(binding.arguments(ctx)) == set(analyses[analysis_id].spec.params), analysis_id
 
 
 def test_the_bindings_of_the_gradient_analyses_give_the_gamma_of_the_target():
@@ -107,7 +110,7 @@ def test_a_target_without_the_model_makes_pns_safe_levels_unavailable():
     assert unavailable(ctx, analyses["pns.safe.levels"]) == [
         "for the analysis pns.safe.levels, the target 'scanner' does not give: model pns.safe"
     ]
-    for analysis_id in ("seq.index", "gradient.limits", "gradient.blocks"):
+    for analysis_id in ("seq.index", "gradient.limits", "gradient.blocks", "gradient.spectrum"):
         assert unavailable(ctx, analyses[analysis_id]) == []
 
 
@@ -140,7 +143,7 @@ def test_a_raster_that_is_a_pypulseq_default_is_a_reason_for_the_analyses_that_u
     }
     ctx = RunContext(spin_echo_sequence(), safe_profile(), raster_sources=sources)
     analyses = registry.analyses()
-    assert [unavailable(ctx, analyses[i]) for i in sorted(analyses)] == [[]] * 4
+    assert [unavailable(ctx, analyses[i]) for i in sorted(analyses)] == [[]] * 5
     fake = FakeAnalysis("t.r", rasters=("GradientRasterTime", "AdcRasterTime"))
     assert unavailable(ctx, fake) == [
         (
@@ -151,7 +154,12 @@ def test_a_raster_that_is_a_pypulseq_default_is_a_reason_for_the_analyses_that_u
     sources["GradientRasterTime"] = "pypulseq default"
     ctx = RunContext(spin_echo_sequence(), safe_profile(), raster_sources=sources)
     assert unavailable(ctx, analyses["seq.index"]) == []
-    for analysis_id in ("gradient.limits", "gradient.blocks", "pns.safe.levels"):
+    for analysis_id in (
+        "gradient.limits",
+        "gradient.blocks",
+        "gradient.spectrum",
+        "pns.safe.levels",
+    ):
         assert unavailable(ctx, analyses[analysis_id]) == [
             (
                 f"for the analysis {analysis_id}, the file does not declare GradientRasterTime "
