@@ -806,10 +806,10 @@ An analysis result never stops the run and never changes the exit status.
 
 A `Series` is the form of the values of an analysis in a matrix and in the JSON
 result. [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#5-series-values-for-json)
 gives its fields, its four kinds (`SAMPLES`, `ENVELOPE`, `POINTS` and `RUNS`) and
 its arrays. The series of `pns.safe.levels` are in [its section
-6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#6-analyses-the-analyses-and-their-registry).
+6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#6-analyses-the-analyses-and-their-registry).
 
 ```python
 from pulseq_checks import read_profile, run_checks
@@ -984,14 +984,15 @@ Each item has the keys `id`, `version`, `target`, `state`, `reason` and
 empty unless the state is "done", and also for a "done" analysis that has
 nothing for JSON (`seq.index`, `gradient.limits` and `gradient.blocks`).
 
-A series object has the keys `name`, `kind`, `unit`, `t0_s`, `step_s`, `end_s`,
-`meta` and `arrays`. `kind` is `"samples"`, `"envelope"`, `"points"` or
-`"runs"`. Each item of `arrays` is `{"dtype", "length", "data"}`: the numpy
-dtype name, the number of elements, and the little-endian bytes of the array,
-gzipped and base64-encoded. A float that is not finite in an array is in the bytes, and in
-`meta` or in a time field it is the string `"inf"`, `"-inf"` or `"nan"`.
+A series object has the keys `name`, `kind`, `unit`, `coord_unit`,
+`coord_start`, `coord_step`, `coord_end`, `meta` and `arrays`. `kind` is
+`"samples"`, `"envelope"`, `"points"` or `"runs"`. Each item of `arrays` is
+`{"dtype", "length", "data"}`: the numpy dtype name, the number of elements,
+and the little-endian bytes of the array, gzipped and base64-encoded. A float
+that is not finite in an array is in the bytes, and in `meta` or in a
+coordinate field it is the string `"inf"`, `"-inf"` or `"nan"`.
 [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#5-series-values-for-json)
 gives the form of a series and the encoding of an array, and
 `Series.from_obj` and `decode_array` read them. A tool that is not in Python
 decodes `data` with base64, then gzip, then the little-endian numbers of
@@ -1017,9 +1018,10 @@ length 0:
       "name": "pns_total",
       "kind": "envelope",
       "unit": "1",
-      "t0_s": 0.0,
-      "step_s": 0.00615,
-      "end_s": 0.00593,
+      "coord_unit": "s",
+      "coord_start": 0.0,
+      "coord_step": 0.00615,
+      "coord_end": 0.00593,
       "meta": {
         "hardware": "pypulseq example hardware (not a real scanner)",
         "asc_file": null,
@@ -1041,13 +1043,14 @@ length 0:
       "name": "pns_above_1",
       "kind": "runs",
       "unit": "1",
-      "t0_s": 0.0,
-      "step_s": null,
-      "end_s": null,
+      "coord_unit": "s",
+      "coord_start": 0.0,
+      "coord_step": null,
+      "coord_end": null,
       "meta": {"threshold": 1.0},
       "arrays": {
-        "start_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
-        "end_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "start": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
+        "end": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "num_samples": {"dtype": "int64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "peak": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "peak_time_s": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."}
@@ -1253,9 +1256,9 @@ it uses in `CheckSpec.analyses`.
   value from the same context, so a rule and a requested analysis share one
   compute.
 
-[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#6-analyses-the-analyses-and-their-registry)
+[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#6-analyses-the-analyses-and-their-registry)
 gives the registry of analyses, and the fields of each value are in [its
-sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md#1-seq_index-the-block-table).
+sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md#1-seq_index-the-block-table).
 
 ### The analyses of this package
 
@@ -1435,7 +1438,7 @@ pulseq-analysis. It is a dependency of pulseq-checks. A check gets a value
 through an analysis of pulseq-analysis (`ctx.analysis`, [section
 7](#using-an-analysis)). A plugin can use the modules too, and pulseq-reports
 uses them for its plots. The [usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc2/docs/usage.md)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc3/docs/usage.md)
 gives the interface of the modules: the names, the fields of each value, the
 units and the rules for the times and the block IDs.
 

@@ -589,21 +589,23 @@ def _series_pair() -> tuple[Series, ...]:
         name="level",
         kind=SeriesKind.ENVELOPE,
         unit="1",
+        coord_unit="s",
         arrays={
             "min": np.array([0.0, 0.25, -np.inf], dtype=np.float32),
             "max": np.array([0.5, np.nan, 1.5], dtype=np.float32),
         },
-        step_s=1e-3,
-        end_s=2.5e-3,
+        coord_step=1e-3,
+        coord_end=2.5e-3,
         meta={"peak": math.inf, "low": -math.inf, "unknown": math.nan, "name": "x", "n": 3},
     )
     runs = Series(
         name="above",
         kind=SeriesKind.RUNS,
         unit="1",
+        coord_unit="s",
         arrays={
-            "start_s": np.array([0.1 + 0.2], dtype=np.float64),
-            "end_s": np.array([0.5], dtype=np.float64),
+            "start": np.array([0.1 + 0.2], dtype=np.float64),
+            "end": np.array([0.5], dtype=np.float64),
             "num_samples": np.array([7], dtype=np.int64),
         },
         meta={"threshold": 1.0},

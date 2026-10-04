@@ -2157,7 +2157,7 @@ first error as its cause. `run_checks` raises it.
 **How:** The test lists the IDs. It replaces `pulseq_analysis.analyses.registry` with a function
 that raises, and calls `registry.analyses()` and `run_checks`.
 
-**Assumptions:** The list of the four IDs is that of pulseq-analysis `v0.1.0rc2`: a newer
+**Assumptions:** The list of the four IDs is that of pulseq-analysis `v0.1.0rc3`: a newer
 version of that package with more analyses changes it.
 
 #### `test_check_rules_are_keyed_by_spec_id`
