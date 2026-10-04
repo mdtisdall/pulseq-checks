@@ -45,6 +45,8 @@ Which rotations are safe after a fail. The slew and the PNS under a rotation. Th
 
 **Rasters:** `GradientRasterTime`, `BlockDurationRaster`
 
+**Analyses:** `gradient.limits`, `gradient.blocks`
+
 **Limit:** opts.max_grad of the target profile, in mT/m (converted from the unit of the profile with the gamma of its Opts), for each physical axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
@@ -82,6 +84,8 @@ The amplitude on the physical axes of the scanner when the scan rotates the logi
 **Models:** None
 
 **Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
+**Analyses:** `gradient.limits`, `gradient.blocks`
 
 **Limit:** opts.max_grad of the target profile, in mT/m (converted from the unit of the profile with the gamma of its Opts). The same limit applies to each axis.
 
@@ -121,6 +125,8 @@ The slew on the physical axes of the scanner when the scan rotates the logical a
 
 **Rasters:** `GradientRasterTime`, `BlockDurationRaster`
 
+**Analyses:** `gradient.limits`, `gradient.blocks`
+
 **Limit:** opts.max_slew of the target profile, in T/m/s (converted from the unit of the profile with the gamma of its Opts). A profile that gives opts.max_grad and opts.rise_time in place of opts.max_slew gives the slew limit max_grad / rise_time, the value that pp.Opts calculates. The same limit applies to each axis.
 
 **Tolerance:** Relative, 1e-9: a value passes when value <= limit * (1 + 1e-9). This absorbs only the rounding of floating-point arithmetic in the conversion of the units (a sequence that is built exactly at the limit passes). It is far below any change that a sequence author makes. It is the tolerance of the gradient limits card of pulseq-reports.
@@ -158,6 +164,8 @@ That a subject feels no stimulation: SAFE is a model, and its prediction is only
 **Models:** `pns.safe`
 
 **Rasters:** `GradientRasterTime`, `BlockDurationRaster`
+
+**Analyses:** `pns.safe.levels`, `seq.index`
 
 **Limit:** 100 % of the stimulation limit.
 
@@ -197,6 +205,8 @@ The times of the samples and the corner points of arbitrary gradients and extend
 
 **Rasters:** None
 
+**Analyses:** `seq.index`
+
 **Limit:** 0 timing errors. The target does not give a limit.
 
 **Tolerance:** The tolerance of check_timing, which this check does not change: a time is on a raster when its ratio to the raster is within 1e-6 of an integer; dead times, ringdown and block durations are compared with a tolerance of 1e-9 s (pypulseq.eps).
@@ -234,6 +244,8 @@ That the times of the events of the file are on these rasters: timing.pypulseq c
 **Models:** None
 
 **Rasters:** None
+
+**Analyses:** None
 
 **Limit:** T of the raster of the result value, in seconds. The target profile gives it (rasters.<name>) and has no default.
 

@@ -61,6 +61,16 @@ evaluated, 2 when a check failed, and 1 for an error. The profile has no SAFE
 parameters, so `pns.safe` is "not evaluated": it does not change the status,
 because the command did not name it.
 
+## The series of an analysis
+
+To keep the SAFE PNS level over time, and the intervals at or above 100 %, in
+the JSON result (the key `"analyses"`, from the analysis `pns.safe.levels` of
+[pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis)):
+
+```
+pulseq-check scan.seq --target prisma.toml --analysis pns.safe.levels --json result.json
+```
+
 ## All the errors of a check
 
 A result gives the worst value of a check. It can also have findings: one for
@@ -104,8 +114,9 @@ for result in matrix.results:
 
 - [`docs/usage.md`](docs/usage.md): the target profile, the check
   configuration, the command, the Python API, the result JSON, how to pass the
-  findings to another tool, how to write a plugin check (also one that gives
-  findings), and how a check uses the measurement modules of pulseq-analysis.
+  findings to another tool, the analysis results, how to write a plugin check
+  (also one that gives findings), and how a check uses the analyses of
+  pulseq-analysis.
 - [`docs/checks.md`](docs/checks.md): the specification of each check.
 - [`docs/rasters.md`](docs/rasters.md): why the raster and timing checks are
   stricter than `check_timing` of pypulseq and `checkTiming` of MATLAB Pulseq,

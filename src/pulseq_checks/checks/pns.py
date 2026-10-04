@@ -1,15 +1,17 @@
 """The check rule `pns.safe` (plan section 4.7): the peak of the SAFE PNS total of the
 whole sequence, with the SAFE parameters of the target profile. A fail also gives each interval
-of samples at or above 100 % as a finding (`PnsLevels.above`)."""
+of samples at or above 100 % as a finding (`PnsLevels.above`).
+
+The levels come from the analysis `pns.safe.levels` and the block index from `seq.index`, both
+of pulseq-analysis. `ctx.analysis` calculates each one time for each target, with the SAFE
+hardware of the target from the binding (`bindings.BINDINGS`)."""
 
 import numpy as np
-from pulseq_analysis.pns import pns_levels_for
 from pulseq_analysis.pns_levels import NO_GRADIENTS, PNS_LIMIT, PnsInterval
-from pulseq_analysis.seq_index import sequence_index
 
 from ..results import Finding, Location, Result, State
 from ..rules import CheckPromise, CheckSpec, RunContext
-from ..safe_model import SAFE_MODEL, hw_from_dict
+from ..safe_model import SAFE_MODEL
 
 
 class _SafePns:
@@ -49,6 +51,7 @@ class _SafePns:
         ),
         url=None,
         rasters=("GradientRasterTime", "BlockDurationRaster"),
+        analyses=("pns.safe.levels", "seq.index"),
         findings=(
             "One finding for each interval of consecutive samples where the SAFE total is at "
             "or above 100 % of the stimulation limit, in time order. A fail has at least one "
@@ -92,10 +95,7 @@ class _SafePns:
     )
 
     def run(self, ctx: RunContext) -> Result:
-        params = ctx.profile.models["pns.safe"]
-        hw = hw_from_dict(params)
-        label = params.get("name") or ctx.profile.sources["models.pns.safe"]
-        levels = ctx.measure("pns_levels", lambda seq: pns_levels_for(seq, hardware=(hw, label)))
+        levels = ctx.analysis("pns.safe.levels")
         model = {"model": "pns.safe", "model_version": SAFE_MODEL.version}
         if levels.reason == NO_GRADIENTS:
             return ctx.result(
@@ -119,7 +119,7 @@ class _SafePns:
         by the rule of `_location`, for all intervals in one call of `np.searchsorted`."""
         if not intervals:
             return ()
-        index = ctx.measure("index", sequence_index)
+        index = ctx.analysis("seq.index")
         starts = np.array([interval.start_s for interval in intervals])
         blocks = np.maximum(np.searchsorted(index.start_s, starts, side="right") - 1, 0)
         block_ids = index.block_id[blocks].tolist()
@@ -151,7 +151,7 @@ class _SafePns:
         """The block that holds `time_s`: the last block that starts at or before it."""
         if time_s is None:
             return None
-        index = ctx.measure("index", sequence_index)
+        index = ctx.analysis("seq.index")
         i = max(int(np.searchsorted(index.start_s, time_s, side="right")) - 1, 0)
         return Location(block=int(index.block_id[i]), time_s=time_s)
 

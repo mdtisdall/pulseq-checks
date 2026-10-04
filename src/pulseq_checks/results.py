@@ -1,7 +1,9 @@
 """The results of a check run (design section 5.3): `State`, `Location`, `Result`,
 `Finding`, `TargetInfo` and `ResultMatrix`, with its exit status (design section 5.6) and its
 JSON form (decision 9 of the plan, and plan check-findings, section 4.5). Also
-`CheckRunError`, the base of each error of the run.
+`AnalysisState` and `AnalysisResult`, the result of an analysis of pulseq-analysis for one
+target (plan pulseq-analysis, section 4.6), and `CheckRunError`, the base of each error of
+the run.
 
 The JSON form cannot hold a float that is not finite (strict JSON), so `to_json` writes
 infinity and "not a number" as the strings "inf", "-inf" and "nan", and `from_json` reads
@@ -17,8 +19,11 @@ from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from typing import Any
 
+from pulseq_analysis.series import Series
+
 # The version of the JSON form of a `ResultMatrix` (the "format" key). It stays 1 in the
-# release candidates: the findings keys of check-findings section 4.5 are part of format 1.
+# release candidates: the findings keys of check-findings section 4.5 and the "analyses" key
+# are part of format 1.
 FORMAT = 1
 
 
@@ -119,6 +124,29 @@ class Result:
     findings_omitted: int = 0
 
 
+class AnalysisState(Enum):
+    DONE = "done"
+    NOT_EVALUATED = "not evaluated"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class AnalysisResult:
+    """The result of one analysis for one target (plan pulseq-analysis, section 4.6). `id`
+    and `version` are those of the `AnalysisSpec`. `state` is "done" with the `series` of
+    `Analysis.to_series`, "not evaluated" when the analysis is not available for the target,
+    or "error" when `compute` or `to_series` raised an exception. `reason` is necessary for
+    "not evaluated" and "error". An analysis result is not a check result: it does not change
+    the exit status of the matrix."""
+
+    id: str
+    version: int
+    target: str
+    state: AnalysisState
+    reason: str | None = None
+    series: tuple[Series, ...] = ()
+
+
 @dataclass(frozen=True)
 class TargetInfo:
     """A target of a run, as a result matrix keeps it: its name, the source of each value
@@ -136,12 +164,15 @@ class TargetInfo:
 class ResultMatrix:
     """The results of one run: one sequence, its targets, and one result for each check and
     target. `sequence` is the path of the `.seq` file as the caller gave it, or
-    "<Sequence object>". `package_version` is the version of pulseq-checks that made it."""
+    "<Sequence object>". `package_version` is the version of pulseq-checks that made it.
+    `analyses` are the results of the analyses that the caller asked for, in the order of the
+    targets, then of the analysis IDs."""
 
     sequence: str
     package_version: str
     targets: tuple[TargetInfo, ...]
     results: tuple[Result, ...]
+    analyses: tuple[AnalysisResult, ...] = ()
 
     def exit_status(self) -> int:
         """0, 2 or 1 by design section 5.6: 1 when a result is "error" or a required result
@@ -175,6 +206,19 @@ class ResultMatrix:
         )
         return replace(self, results=results)
 
+    def analysis(self, target: str, id: str) -> AnalysisResult | None:
+        """The result of the analysis `id` for the target named `target`, or None when the
+        matrix has none."""
+        for a in self.analyses:
+            if a.target == target and a.id == id:
+                return a
+        return None
+
+    def without_series(self) -> ResultMatrix:
+        """A new matrix in which each analysis result has no series. The other fields are the
+        same."""
+        return replace(self, analyses=tuple(replace(a, series=()) for a in self.analyses))
+
     def to_json(self) -> str:
         """One JSON object with `"format": FORMAT` (decision 9). The keys are in a fixed
         order; a float that is not finite is written as a string (module docstring)."""
@@ -192,6 +236,7 @@ class ResultMatrix:
                 for t in self.targets
             ],
             "results": [_result_to_obj(r) for r in self.results],
+            "analyses": [_analysis_to_obj(a) for a in self.analyses],
         }
         return json.dumps(obj, indent=2, allow_nan=False)
 
@@ -199,7 +244,8 @@ class ResultMatrix:
     def from_json(cls, text: str) -> ResultMatrix:
         """The matrix of `to_json`: `from_json(m.to_json()) == m`. A format above `FORMAT`
         is a `ValueError` that names both versions. An unknown key or a missing key in any
-        object is a `ValueError` that names it."""
+        object is a `ValueError` that names it; the matrix must have the key "analyses"
+        (decision P5 of the implementation plan). A bad series is a `ValueError` too."""
         # A value of a wrong type is a `ValueError` too (hence the `noqa: TRY004`): a caller
         # of `from_json` catches one type for a bad text.
         obj = json.loads(text)
@@ -214,7 +260,9 @@ class ResultMatrix:
                 f"reads format {FORMAT} and lower"
             )
         _check_keys(
-            obj, ("format", "package_version", "sequence", "targets", "results"), "the matrix"
+            obj,
+            ("format", "package_version", "sequence", "targets", "results", "analyses"),
+            "the matrix",
         )
         targets = []
         for t in _list(obj["targets"], "targets"):
@@ -232,6 +280,7 @@ class ResultMatrix:
             package_version=obj["package_version"],
             targets=tuple(targets),
             results=tuple(_result_from_obj(r) for r in _list(obj["results"], "results")),
+            analyses=tuple(_analysis_from_obj(a) for a in _list(obj["analyses"], "analyses")),
         )
 
 
@@ -240,6 +289,7 @@ class ResultMatrix:
 _FLOAT_FIELDS = ("value", "limit")
 _RESULT_KEYS = tuple(f.name for f in fields(Result))
 _FINDING_KEYS = tuple(f.name for f in fields(Finding))
+_ANALYSIS_KEYS = tuple(f.name for f in fields(AnalysisResult))
 
 
 def _float_to_json(x: float | None) -> float | str | None:
@@ -326,6 +376,32 @@ def _result_from_obj(obj: Any) -> Result:
     if not isinstance(omitted, int) or isinstance(omitted, bool) or omitted < 0:
         raise ValueError(f'"findings_omitted" must be an integer of 0 or more, not {omitted!r}')
     return Result(**kwargs)
+
+
+def _analysis_to_obj(a: AnalysisResult) -> dict[str, Any]:
+    return {
+        "id": a.id,
+        "version": a.version,
+        "target": a.target,
+        "state": a.state.value,
+        "reason": a.reason,
+        "series": [s.to_obj() for s in a.series],
+    }
+
+
+def _analysis_from_obj(obj: Any) -> AnalysisResult:
+    _check_keys(obj, _ANALYSIS_KEYS, "an analysis result")
+    version = obj["version"]
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ValueError(f'"version" of an analysis result must be an integer, not {version!r}')  # noqa: TRY004
+    return AnalysisResult(
+        id=obj["id"],
+        version=version,
+        target=obj["target"],
+        state=AnalysisState(obj["state"]),
+        reason=obj["reason"],
+        series=tuple(Series.from_obj(s) for s in _list(obj["series"], "series")),
+    )
 
 
 def _list(x: Any, name: str) -> list:

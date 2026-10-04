@@ -20,7 +20,7 @@ from typing import NoReturn
 
 from .config import read_check_config
 from .profile import read_profile
-from .results import CheckRunError, Finding, Result, ResultMatrix, State
+from .results import AnalysisState, CheckRunError, Finding, Result, ResultMatrix, State
 from .run import run_checks
 
 PROG = "pulseq-check"
@@ -85,6 +85,14 @@ def _make_parser() -> argparse.ArgumentParser:
         default=[],
         help="select this check and make it required for each target; repeat it for more "
         "checks. With --config, it is added to the select and the required of the file",
+    )
+    parser.add_argument(
+        "--analysis",
+        metavar="ID",
+        action="append",
+        default=[],
+        help="keep the result of this analysis for each target in the JSON result; repeat it "
+        "for more analyses",
     )
     parser.add_argument(
         "--fast",
@@ -166,6 +174,7 @@ def _run(args: argparse.Namespace) -> ResultMatrix:
         select=select,
         required=required,
         fast_only=fast_only or args.fast,
+        analyses=args.analysis,
     )
 
 
@@ -179,10 +188,12 @@ def _write_json(matrix: ResultMatrix, path: str) -> None:
 def summary(matrix: ResultMatrix, *, show_findings: bool = False) -> str:
     """The summary for a person (plan section 4.8), in plain text with aligned columns:
     one line for each check and target, then the "not evaluated" and "error" results with
-    their reasons, then the findings (only when a result has findings: one count line for
-    each result with findings, and with `show_findings` one line for each finding that the
-    matrix keeps), then the unused profile sections of each target, then the meaning of
-    the exit status. The lines of a check are in the order of `matrix.results`."""
+    their reasons (the checks first, then one line for each analysis result that is not
+    "done", "analysis ID, target NAME", with its reason; this part also appears when only
+    analyses are not "done"), then the findings (only when a result has findings: one count
+    line for each result with findings, and with `show_findings` one line for each finding
+    that the matrix keeps), then the unused profile sections of each target, then the meaning
+    of the exit status. The lines of a check are in the order of `matrix.results`."""
     lines = [f"sequence: {matrix.sequence}", ""]
 
     if matrix.results:
@@ -206,12 +217,16 @@ def summary(matrix: ResultMatrix, *, show_findings: bool = False) -> str:
         lines.append("results: no check ran")
 
     problems = [r for r in matrix.results if r.state in (State.NOT_EVALUATED, State.ERROR)]
-    if problems:
+    analysis_problems = [a for a in matrix.analyses if a.state is not AnalysisState.DONE]
+    if problems or analysis_problems:
         lines += ["", "not evaluated and errors:"]
         for r in problems:
             required = " (required)" if r.required else ""
             lines.append(f"  {r.state.value}: {r.check_id}, target {r.target}{required}")
             lines += [f"    {line}" for line in (r.reason or "no reason given").splitlines()]
+        for a in analysis_problems:
+            lines.append(f"  {a.state.value}: analysis {a.id}, target {a.target}")
+            lines += [f"    {line}" for line in (a.reason or "no reason given").splitlines()]
 
     with_findings = [r for r in matrix.results if r.findings or r.findings_omitted]
     if with_findings:

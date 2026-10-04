@@ -697,3 +697,13 @@ def test_the_ids_and_inputs_of_the_specs():
         "opts.adc_dead_time",
     )
     assert PYPULSEQ.spec.pypulseq == "Sequence.check_timing"
+
+
+def test_the_analyses_of_the_checks_of_this_package_are_installed_analyses():
+    installed = registry.analyses()
+    # A check of this package gives no `url`; a plugin check does.
+    rules = [rule for rule in registry.check_rules().values() if rule.spec.url is None]
+    assert {rule.spec.id for rule in rules} >= {"timing.rasters", "timing.pypulseq", "pns.safe"}
+    for rule in rules:
+        assert set(rule.spec.analyses) <= set(installed), rule.spec.id
+    assert PYPULSEQ.spec.analyses == ("seq.index",)
