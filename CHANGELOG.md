@@ -3,7 +3,24 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
-## Unreleased
+## 0.1.0rc3 (2026-10-04)
+
+The third release candidate. The measurement modules are in their own
+package, pulseq-analysis (`0.1.0rc2`), and a run can keep the result of an
+analysis for each target, with its series, in the matrix and in the JSON
+result: for example the SAFE PNS level over time and the intervals at or
+above 100 % (`--analysis pns.safe.levels`). Each check also says what a pass
+promises and what a fail means. The results of the checks do not change. The
+JSON result of this version and the JSON result of `0.1.0rc2` cannot read
+each other (see "Changed"), and the old import paths of the measurement
+modules stop working. The plans are `docs/plans/pulseq-analysis.md` and
+`docs/plans/pulseq-analysis-implementation.md`.
+
+The time budget before the tag (`scripts/budget.py`, 10^6 blocks, Apple M1
+Max, with the read of the file): the fast checks together take 4.28 s
+(budget: 10 s), and all six checks take 24.54 s. With
+`analyses=["pns.safe.levels"]` they take 24.41 s, and the JSON result is
+0.05 MB (`docs/plans/pulseq-analysis.md`, section 9.2).
 
 ### Added
 

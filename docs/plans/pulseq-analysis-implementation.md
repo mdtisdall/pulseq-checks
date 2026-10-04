@@ -3,8 +3,8 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: approved by the user on 2026-10-01. Phases 0, 2 and 4 are done; phase R
-is next. Written on 2026-10-01.
+Status: approved by the user on 2026-10-01. Done: phases 0 (#40), 2 (#41) and
+4 (#44), and phase R (0.1.0rc3). Written on 2026-10-01.
 
 ## 1. Scope
 
