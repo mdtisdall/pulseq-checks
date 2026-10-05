@@ -2,10 +2,11 @@
 `gradient.slew.axis` and `gradient.amplitude.any-orientation`.
 
 The three rules share one measurement, the analysis `gradient.limits` over the whole file,
-which `ctx.analysis` calculates one time for each target. `gradient_limits` has no argument for
-the limits: its numbers do not depend on them. The limit of a rule comes from the
-`HardwareLimits` of the target, which `_hardware_limits` builds for all three rules in one
-way.
+which `ctx.analysis` calculates one time for each target. `gradient_limits` has no argument:
+its numbers do not depend on the limits or on a gamma. They are magnitudes in Hz/m and Hz/m/s,
+and a rule converts them to mT/m or T/m/s with the magnitude of the gamma of the target
+(`gamma_magnitude`). The limit of a rule comes from the `HardwareLimits` of the target, which
+`_hardware_limits` builds for all three rules in one way.
 
 A rule that fails also gives each block that is above its limit as a finding. The values of
 each block come from a second analysis, `gradient.blocks` (`block_gradient_values`), which
@@ -18,6 +19,7 @@ import math
 import numpy as np
 from pulseq_analysis.grad_limits import BlockGradientValues, GradientLimits
 
+from ..bindings import gamma_magnitude
 from ..profile import HardwareLimits
 from ..results import Finding, Location, Result, State
 from ..rules import CheckPromise, CheckSpec, RunContext
@@ -52,10 +54,12 @@ _LOGICAL_AXES = (
     "The axes are the logical axes of the sequence, not the physical gradient axes of a scanner."
 )
 _GAMMA = (
-    "The value is converted with the gamma of the target (opts.gamma, or 42.576 MHz/T, the "
-    "value of pypulseq, when the profile does not give it), or with the gamma of seq.system "
-    "when the limits come from the sequence object. The limit uses the same gamma, so the "
-    "value and the limit are in the same units."
+    "pulseq-analysis gives the value in Hz/m or Hz/m/s, with no gamma. The check converts it "
+    "with the magnitude of the gamma of the target (|opts.gamma|, or 42.576 MHz/T, the value "
+    "of pypulseq, when the profile does not give it), or with the magnitude of the gamma of "
+    "seq.system when the limits come from the sequence object. A negative gamma is valid: the "
+    "value and the limit are magnitudes, so the check uses the magnitude of gamma. The limit "
+    "uses the same gamma, so the value and the limit are in the same units."
 )
 _FINDINGS_SENTENCE = "The result also gives each block above the limit as a finding (see Findings)."
 _FINDINGS_FOR_FAIL = (
@@ -82,6 +86,19 @@ _NOT_EVALUATED_RASTERS = (
 )
 
 
+def _hz_per_m_to_mt_per_m(value, g: float):
+    """An amplitude (a number, or an array of them) in Hz/m in mT/m, with `g` the magnitude of
+    gamma in Hz/T. The expression is the one of the limits, so a value at the limit is equal to
+    it."""
+    return value / g * 1e3
+
+
+def _hz_per_m_per_s_to_t_per_m_per_s(value, g: float):
+    """A slew rate (a number, or an array of them) in Hz/m/s in T/m/s, with `g` the magnitude
+    of gamma in Hz/T."""
+    return value / g
+
+
 def _hardware_limits(ctx: RunContext) -> HardwareLimits:
     """The `HardwareLimits` that all three rules use for the target of `ctx`:
     `ctx.hardware_limits` when it is not None (both limits of the profile, or the limits of
@@ -94,13 +111,15 @@ def _hardware_limits(ctx: RunContext) -> HardwareLimits:
     if ctx.hardware_limits is not None:
         return ctx.hardware_limits
     # The conversion of `profile.read_profile`: pp.Opts stores max_grad in Hz/m and max_slew
-    # in Hz/m/s, whatever unit the profile gives.
+    # in Hz/m/s, whatever unit the profile gives, as magnitudes for each sign of gamma. Here
+    # the limits come from the profile, so `gamma(ctx)` is the gamma of its Opts.
     opts = ctx.profile.make_opts()
+    g = gamma_magnitude(ctx)
     max_grad, max_slew = math.nan, math.nan
     if ctx.profile.has_value("opts.max_grad"):
-        max_grad = opts.max_grad / opts.gamma * 1e3
+        max_grad = opts.max_grad / g * 1e3
     if ctx.profile.has_value("opts.max_slew"):
-        max_slew = opts.max_slew / opts.gamma
+        max_slew = opts.max_slew / g
     return HardwareLimits(
         max_grad_mt_per_m=max_grad, max_slew_t_per_m_per_s=max_slew, label=ctx.profile.name
     )
@@ -149,8 +168,13 @@ def _entries_above_limit(
 
 
 class _GradientCheck:
-    """A gradient check: `spec`, its `unit`, the limit that it uses, the candidates for its
-    value, and its findings. A subclass gives `_limit`, `_candidates` and `_findings`."""
+    """A gradient check: `spec`, its `unit`, the limit that it uses, the conversion of the
+    values of the analyses to `unit`, the candidates for its value, and its findings. A
+    subclass gives `_limit`, `_convert`, `_candidates` and `_findings`.
+
+    The analyses give magnitudes in Hz/m and Hz/m/s, with no gamma. `run` gives `g`, the
+    magnitude of the gamma of the target (`gamma_magnitude`), to `_candidates` and
+    `_findings`, which convert with `_convert` before they compare with the limit."""
 
     spec: CheckSpec
     unit: str
@@ -158,29 +182,37 @@ class _GradientCheck:
     def _limit(self, limits: HardwareLimits) -> float:
         raise NotImplementedError
 
-    def _candidates(
-        self, measured: GradientLimits
-    ) -> list[tuple[float, int | None, float, str | None]]:
-        """The (value, block ID, time in seconds, detail) of each quantity that the check
-        compares with its limit, in the order of the tie rule. The detail (for example
-        "axis y") is the `reason` of a pass or a fail: which quantity gave the value."""
+    @staticmethod
+    def _convert(value, g: float):
+        """`value` (a number, or an array of them) in Hz/m or Hz/m/s, converted to `unit`
+        with `g`, the magnitude of gamma, in Hz/T."""
         raise NotImplementedError
 
-    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
-        """One finding for each block (and axis) of `blocks` that is above `limit`, in the
-        order of the spec."""
+    def _candidates(
+        self, measured: GradientLimits, g: float
+    ) -> list[tuple[float, int | None, float, str | None]]:
+        """The (value, block ID, time in seconds, detail) of each quantity that the check
+        compares with its limit, in `unit` (converted with `g`), in the order of the tie rule.
+        The detail (for example "axis y") is the `reason` of a pass or a fail: which quantity
+        gave the value."""
+        raise NotImplementedError
+
+    def _findings(self, blocks: BlockGradientValues, limit: float, g: float) -> tuple[Finding, ...]:
+        """One finding for each block (and axis) of `blocks` that is above `limit`, with the
+        values converted with `g`, in the order of the spec."""
         raise NotImplementedError
 
     def run(self, ctx: RunContext) -> Result:
         measured, limits = _measurement(ctx)
         limit = self._limit(limits)
+        g = gamma_magnitude(ctx)
         if measured.reason is not None:
             return ctx.result(
                 self.spec, State.PASS, value=0.0, limit=limit, unit=self.unit, location=None
             )
         # The limit is one number for all candidates, so the candidate with the largest ratio
         # to the limit is the largest one. The first largest one wins a tie.
-        candidates = self._candidates(measured)
+        candidates = self._candidates(measured, g)
         value, block, time_s, detail = candidates[0]
         for candidate in candidates[1:]:
             if candidate[0] > value:
@@ -190,7 +222,7 @@ class _GradientCheck:
         findings: tuple[Finding, ...] = ()
         if state is State.FAIL:
             blocks = ctx.analysis("gradient.blocks")
-            findings = self._findings(blocks, limit)
+            findings = self._findings(blocks, limit, g)
         return ctx.result(
             self.spec,
             state,
@@ -229,7 +261,8 @@ class _AmplitudeAxis(_GradientCheck):
         models=(),
         limit=(
             "opts.max_grad of the target profile, in mT/m (converted from the unit of the "
-            "profile with the gamma of its Opts). The same limit applies to each axis."
+            "profile with the magnitude of the gamma of its Opts). The same limit applies to "
+            "each axis."
         ),
         tolerance=_TOLERANCE,
         pass_condition=(
@@ -282,8 +315,12 @@ class _AmplitudeAxis(_GradientCheck):
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_grad_mt_per_m
 
-    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
-        columns = [(blocks.peak_mt_per_m[a], blocks.peak_time_s[a]) for a in _AXES]
+    _convert = staticmethod(_hz_per_m_to_mt_per_m)
+
+    def _findings(self, blocks: BlockGradientValues, limit: float, g: float) -> tuple[Finding, ...]:
+        columns = [
+            (self._convert(blocks.peak_hz_per_m[a], g), blocks.peak_time_s[a]) for a in _AXES
+        ]
         axes, block_ids, values, times = _entries_above_limit(blocks, limit, columns)
         return tuple(
             Finding(
@@ -300,11 +337,16 @@ class _AmplitudeAxis(_GradientCheck):
         )
 
     def _candidates(
-        self, measured: GradientLimits
+        self, measured: GradientLimits, g: float
     ) -> list[tuple[float, int | None, float, str | None]]:
         axes = measured.axes
         return [
-            (axes[a].peak_mt_per_m, axes[a].peak_block, axes[a].peak_time_s, f"axis {a}")
+            (
+                self._convert(axes[a].peak_hz_per_m, g),
+                axes[a].peak_block,
+                axes[a].peak_time_s,
+                f"axis {a}",
+            )
             for a in _AXES
         ]
 
@@ -347,9 +389,10 @@ class _SlewAxis(_GradientCheck):
         models=(),
         limit=(
             "opts.max_slew of the target profile, in T/m/s (converted from the unit of the "
-            "profile with the gamma of its Opts). A profile that gives opts.max_grad and "
-            "opts.rise_time in place of opts.max_slew gives the slew limit max_grad / "
-            "rise_time, the value that pp.Opts calculates. The same limit applies to each axis."
+            "profile with the magnitude of the gamma of its Opts). A profile that gives "
+            "opts.max_grad and opts.rise_time in place of opts.max_slew gives the slew limit "
+            "max_grad / rise_time, the value that pp.Opts calculates. The same limit applies to "
+            "each axis."
         ),
         tolerance=_TOLERANCE,
         pass_condition=(
@@ -415,13 +458,15 @@ class _SlewAxis(_GradientCheck):
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_slew_t_per_m_per_s
 
-    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+    _convert = staticmethod(_hz_per_m_per_s_to_t_per_m_per_s)
+
+    def _findings(self, blocks: BlockGradientValues, limit: float, g: float) -> tuple[Finding, ...]:
         # The order of the columns is the order within a block: for each axis, the junction
         # (at the start of the block) and then the segment.
         columns = []
         for a in _AXES:
-            columns.append((blocks.junction_t_per_m_per_s[a], blocks.start_s))
-            columns.append((blocks.slew_t_per_m_per_s[a], blocks.slew_time_s[a]))
+            columns.append((self._convert(blocks.junction_hz_per_m_per_s[a], g), blocks.start_s))
+            columns.append((self._convert(blocks.slew_hz_per_m_per_s[a], g), blocks.slew_time_s[a]))
         ranks, block_ids, values, times = _entries_above_limit(blocks, limit, columns)
         findings = []
         for rank, block, value, time_s in zip(ranks, block_ids, values, times, strict=True):
@@ -447,11 +492,16 @@ class _SlewAxis(_GradientCheck):
         return tuple(findings)
 
     def _candidates(
-        self, measured: GradientLimits
+        self, measured: GradientLimits, g: float
     ) -> list[tuple[float, int | None, float, str | None]]:
         axes = measured.axes
         return [
-            (axes[a].max_slew_t_per_m_per_s, axes[a].slew_block, axes[a].slew_time_s, f"axis {a}")
+            (
+                self._convert(axes[a].max_slew_hz_per_m_per_s, g),
+                axes[a].slew_block,
+                axes[a].slew_time_s,
+                f"axis {a}",
+            )
             for a in _AXES
         ]
 
@@ -483,7 +533,7 @@ class _AmplitudeAnyOrientation(_GradientCheck):
         models=(),
         limit=(
             "opts.max_grad of the target profile, in mT/m (converted from the unit of the "
-            "profile with the gamma of its Opts), for each physical axis."
+            "profile with the magnitude of the gamma of its Opts), for each physical axis."
         ),
         tolerance=_TOLERANCE,
         pass_condition=(
@@ -538,9 +588,13 @@ class _AmplitudeAnyOrientation(_GradientCheck):
     def _limit(self, limits: HardwareLimits) -> float:
         return limits.max_grad_mt_per_m
 
-    def _findings(self, blocks: BlockGradientValues, limit: float) -> tuple[Finding, ...]:
+    _convert = staticmethod(_hz_per_m_to_mt_per_m)
+
+    def _findings(self, blocks: BlockGradientValues, limit: float, g: float) -> tuple[Finding, ...]:
         _, block_ids, values, times = _entries_above_limit(
-            blocks, limit, [(blocks.vector_peak_mt_per_m, blocks.vector_peak_time_s)]
+            blocks,
+            limit,
+            [(self._convert(blocks.vector_peak_hz_per_m, g), blocks.vector_peak_time_s)],
         )
         return tuple(
             Finding(
@@ -553,11 +607,11 @@ class _AmplitudeAnyOrientation(_GradientCheck):
         )
 
     def _candidates(
-        self, measured: GradientLimits
+        self, measured: GradientLimits, g: float
     ) -> list[tuple[float, int | None, float, str | None]]:
         return [
             (
-                measured.vector_peak_mt_per_m,
+                self._convert(measured.vector_peak_hz_per_m, g),
                 measured.vector_peak_block,
                 measured.vector_peak_time_s,
                 None,

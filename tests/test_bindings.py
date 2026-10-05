@@ -10,7 +10,14 @@ from synthetic import spin_echo_sequence
 from test_run import FakeAnalysis, make_profile, safe_params, safe_profile
 
 from pulseq_checks import registry
-from pulseq_checks.bindings import BINDINGS, Binding, gamma, unavailable
+from pulseq_checks.bindings import (
+    BINDINGS,
+    Binding,
+    gamma,
+    gamma_magnitude,
+    pns_threshold_hz_per_t,
+    unavailable,
+)
 from pulseq_checks.rules import RunContext
 from pulseq_checks.safe_model import hw_from_dict
 
@@ -46,12 +53,12 @@ def test_each_binding_gives_the_parameters_of_its_analysis():
         assert set(binding.arguments(ctx)) == set(analyses[analysis_id].spec.params), analysis_id
 
 
-def test_the_bindings_of_the_gradient_analyses_give_the_gamma_of_the_target():
+def test_the_gamma_is_the_gamma_of_the_profile_and_the_gradient_analyses_take_no_argument():
     profile = make_profile(opts={"gamma": PROFILE_GAMMA})
     ctx = RunContext(spin_echo_sequence(), profile)
     assert gamma(ctx) == PROFILE_GAMMA
     for analysis_id in ("gradient.limits", "gradient.blocks"):
-        assert BINDINGS[analysis_id].arguments(ctx) == {"gamma": PROFILE_GAMMA}
+        assert BINDINGS[analysis_id].arguments(ctx) == {}
 
 
 def test_the_gamma_of_a_sequence_object_with_the_limits_from_it_is_the_gamma_of_the_sequence():
@@ -66,10 +73,9 @@ def test_the_gamma_of_a_sequence_object_with_the_limits_from_it_is_the_gamma_of_
     ctx = RunContext(seq, profile, limits_source="sequence object")
     assert gamma(ctx) == SEQUENCE_GAMMA
     for analysis_id in ("gradient.limits", "gradient.blocks"):
-        assert BINDINGS[analysis_id].arguments(ctx) == {"gamma": SEQUENCE_GAMMA}
-    # The analysis uses it: its value is the value of `gradient_limits` with that gamma.
-    assert ctx.analysis("gradient.limits") == gradient_limits(seq, gamma=SEQUENCE_GAMMA)
-    assert ctx.analysis("gradient.limits") != gradient_limits(seq, gamma=PROFILE_GAMMA)
+        assert BINDINGS[analysis_id].arguments(ctx) == {}
+    # The analysis takes no gamma: the checks convert its values with the gamma.
+    assert ctx.analysis("gradient.limits") == gradient_limits(seq)
     # With the limits of the profile, the same sequence gets the gamma of the profile.
     assert gamma(RunContext(seq, profile)) == PROFILE_GAMMA
 
@@ -77,11 +83,29 @@ def test_the_gamma_of_a_sequence_object_with_the_limits_from_it_is_the_gamma_of_
 def test_the_binding_of_pns_safe_levels_gives_the_safe_hardware_and_the_stimulation_threshold():
     ctx = pns_context()
     arguments = BINDINGS["pns.safe.levels"].arguments(ctx)
-    assert set(arguments) == {"hardware", "thresholds"}
+    assert set(arguments) == {"hardware", "thresholds_hz_per_t"}
     hardware, label = arguments["hardware"]
     assert hardware == hw_from_dict(safe_params())
     assert label == "MP_GPA_EXAMPLE"
-    assert arguments["thresholds"] == (PNS_LIMIT,) == (1.0,)
+    # The stimulation limit in Hz/T: 1 (a fraction) times the gamma of pypulseq.
+    assert PNS_LIMIT == 1.0
+    assert arguments["thresholds_hz_per_t"] == (pns_threshold_hz_per_t(ctx),) == (42.576e6,)
+
+
+def test_a_negative_gamma_is_signed_in_gamma_and_positive_in_its_magnitude_and_the_threshold():
+    """A negative gamma is valid. `gamma` keeps its sign, and `gamma_magnitude` and the PNS
+    threshold of the binding (which pulseq-analysis requires above 0) use its magnitude, for
+    the gamma of a profile and of a sequence object with the limits from it."""
+    profile = make_profile(opts={"gamma": -PROFILE_GAMMA})
+    system = pp.Opts(
+        max_grad=28, grad_unit="mT/m", max_slew=150, slew_unit="T/m/s", gamma=-SEQUENCE_GAMMA
+    )
+    from_profile = RunContext(spin_echo_sequence(), profile)
+    from_sequence = RunContext(pp.Sequence(system), profile, limits_source="sequence object")
+    for ctx, expected in ((from_profile, PROFILE_GAMMA), (from_sequence, SEQUENCE_GAMMA)):
+        assert gamma(ctx) == -expected
+        assert gamma_magnitude(ctx) == expected
+        assert pns_threshold_hz_per_t(ctx) == PNS_LIMIT * expected > 0
 
 
 def test_the_label_of_the_safe_hardware_is_the_source_of_the_model_without_a_name():

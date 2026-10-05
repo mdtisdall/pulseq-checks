@@ -3,8 +3,10 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: planned (2026-10-04). The user approved the decisions D1 to D7 of
-section 5.
+Status: in progress (2026-10-04). PR 1 (this plan) is #54. PR 2 (the move,
+sections 3, 4 and 6.1) is on the branch `chore/pulseq-analysis-rc5`. PR 3
+(the release) is to do. The user approved the decisions D1 to D7 of section
+5. Section 7 has the changes to this plan during the work.
 
 ## 1. Goal
 
@@ -477,4 +479,32 @@ of pulseq-analysis, section 6, item 4.
 
 ## 7. Results
 
-To fill in during PR 2.
+### 7.1 Changes to this plan during PR 2
+
+1. Section 3.4, item 1. The plan said that each check multiplies by a scale
+   factor (`1e3 / g` or `1 / g`). The code has a static method
+   `_convert(value, g)` in each check: `value / g * 1e3` for an amplitude
+   and `value / g` for a slew rate (`_hz_per_m_to_mt_per_m`,
+   `_hz_per_m_per_s_to_t_per_m_per_s`). This is the expression of rc4 and of
+   the limits. Thus for a positive gamma the values are the values of rc4 to
+   the bit, and a value built at the limit is equal to it. `run` gives `g`
+   (not a factor) to `_candidates` and `_findings`.
+2. Section 4.1, item 4. `tests/test_check_pns.py` has the helpers
+   `gamma_of(profile)`, `threshold_of(profile)` and `percent(value, profile)`.
+   `expected_peak` gives the peak in Hz/T, and each test compares
+   `percent(peak, profile)`, the expression of the check, so the values are
+   equal to the bit.
+3. Section 4.2, item 3. `make_profile` of `tests/test_check_gradient.py`
+   builds `HardwareLimits` by hand, so it does not use the conversion of
+   `profile.py:341–342`. The test of that conversion with a negative gamma
+   is `test_the_hardware_limits_of_a_negative_gamma_are_positive` in
+   `tests/test_profile.py` (mT/m and Hz/m units).
+4. Section 4.2, item 1. The boundary test makes its `PnsLevels` with
+   `dataclasses.replace` of a real one. It also tests one float below the
+   threshold, with no interval: "pass" with no finding.
+5. No expected value of a test of a check changed. The hand-made measurement
+   of `test_a_value_with_no_block_has_a_location_with_the_time_only` is in
+   Hz/m, and it converts back to exactly 5 mT/m.
+6. A mutation check of the new tests: with `gamma_magnitude` signed, 8 tests
+   fail (the negative-gamma tests). With `gamma(ctx)` always
+   `seq.system.gamma`, the D5 test and 3 tests of `test_bindings.py` fail.

@@ -151,6 +151,9 @@ Notes:
   evaluated". The one use of a default is `gamma` (pypulseq: 42.576 MHz/T) when
   the profile does not give it: for the units of the limits, for the units of
   the gradient values, and for the SAFE model.
+- A `gamma` can be negative. The checks use its magnitude, `abs(gamma)`,
+  because each limit (`max_grad`, `max_slew` and the PNS stimulation limit) and
+  each value that a check compares with it is a magnitude.
 - `rise_time` with `max_grad` gives the slew limit: pypulseq calculates
   `max_slew` as `max_grad / rise_time`. The checks then use this value as
   `opts.max_slew` (`TargetProfile.has_value("opts.max_slew")` is true), but
@@ -812,11 +815,15 @@ An analysis result never stops the run and never changes the exit status.
 
 A `Series` is the form of the values of an analysis in a matrix and in the JSON
 result. [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#5-series-values-for-json)
 gives its fields, its four kinds (`SAMPLES`, `ENVELOPE`, `POINTS` and `RUNS`) and
 its arrays. The series of `pns.safe.levels` and `gradient.spectrum` are in
 [its section
-6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#6-analyses-the-analyses-and-their-registry).
+6](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#6-analyses-the-analyses-and-their-registry),
+and [its section
+8](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#8-units-and-gamma)
+has the units: no value of pulseq-analysis uses a gamma, the gradient values
+are in Hz/m and Hz/m/s, and the PNS values are in Hz/T.
 
 ```python
 from pulseq_checks import read_profile, run_checks
@@ -848,12 +855,22 @@ from pulseq_checks.safe_model import hw_from_dict
 target = read_profile("prisma.toml")  # seq is a pp.Sequence
 params = target.models["pns.safe"]
 label = params.get("name") or target.sources["models.pns.safe"]
-levels = pns_levels_for(seq, hardware=(hw_from_dict(params), label), thresholds=(PNS_LIMIT,))
+threshold = PNS_LIMIT * abs(target.make_opts().gamma)  # Hz/T
+levels = pns_levels_for(
+    seq, hardware=(hw_from_dict(params), label), thresholds_hz_per_t=(threshold,)
+)
 ```
+
+The PNS values of `levels` are in Hz/T: the fraction of the stimulation limit
+times `abs(gamma)`. `PNS_LIMIT` is the fraction (1.0), so `threshold` is the
+stimulation limit in Hz/T.
 
 `pns_levels_for` keeps its result for one `Sequence` object, the hardware and
 the thresholds. When you gave `run_checks` a `Sequence` object, `seq` is that
-object and the call gets the kept result. When you gave it a path, the run read
+object and the call gets the kept result, but only with the same float
+threshold. The binding takes `abs(gamma)` from `seq.system.gamma` when
+`limits_from_sequence=True`, so then call with `abs(seq.system.gamma)` in place
+of `abs(target.make_opts().gamma)`. When you gave it a path, the run read
 its own `Sequence` object for each target, so a `seq` of yours is another
 object, and the call runs the SAFE model again.
 
@@ -999,7 +1016,7 @@ and the little-endian bytes of the array, gzipped and base64-encoded. A float
 that is not finite in an array is in the bytes, and in `meta` or in a
 coordinate field it is the string `"inf"`, `"-inf"` or `"nan"`.
 [The usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#5-series-values-for-json)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#5-series-values-for-json)
 gives the form of a series and the encoding of an array, and
 `Series.from_obj` and `decode_array` read them. A tool that is not in Python
 decodes `data` with base64, then gzip, then the little-endian numbers of
@@ -1008,9 +1025,11 @@ decodes `data` with base64, then gzip, then the little-endian numbers of
 For example, `pulseq-check scan.seq --target prisma.toml --analysis
 pns.safe.levels --json result.json` has this item (the `data` are
 abbreviated). The series `pns_total` is an `ENVELOPE`: the smallest and the
-greatest SAFE total (1 is the stimulation limit) of each bin of `bin_samples`
-samples. The series `pns_above_1` is `RUNS`: the intervals
-where the total is at or above 1. This sequence has none, so its arrays have
+greatest SAFE total of each bin of `bin_samples` samples. The PNS values are
+in Hz/T, and the stimulation limit is `abs(gamma)` of the target in Hz/T
+(42576000.0 here). The series `pns_above_0` is `RUNS`: the intervals where the
+total is at or above the threshold at position 0 of the thresholds of the
+binding, the stimulation limit. This sequence has none, so its arrays have
 length 0:
 
 ```json
@@ -1024,7 +1043,7 @@ length 0:
     {
       "name": "pns_total",
       "kind": "envelope",
-      "unit": "1",
+      "unit": "Hz/T",
       "coord_unit": "s",
       "coord_start": 0.0,
       "coord_step": 0.00615,
@@ -1035,26 +1054,26 @@ length 0:
         "dt_s": 1e-05,
         "bin_samples": 615,
         "num_samples": 593,
-        "peak": 0.8659592954842638,
+        "peak": 36869082.96453801,
         "peak_time_s": 0.001955,
-        "axis_peaks_x": 0.62481190608934,
-        "axis_peaks_y": 0.86331635876116,
+        "axis_peaks_x": 26601991.71365974,
+        "axis_peaks_y": 36756557.29061516,
         "axis_peaks_z": 0.0
       },
       "arrays": {
         "min": {"dtype": "float32", "length": 1, "data": "H4sIAAAAAAAA/2NgYGAA..."},
-        "max": {"dtype": "float32", "length": 1, "data": "H4sIAAAAAAAA/2teH2sP..."}
+        "max": {"dtype": "float32", "length": 1, "data": "H4sIAAAAAAAA//u+hMcH..."}
       }
     },
     {
-      "name": "pns_above_1",
+      "name": "pns_above_0",
       "kind": "runs",
-      "unit": "1",
+      "unit": "Hz/T",
       "coord_unit": "s",
       "coord_start": 0.0,
       "coord_step": null,
       "coord_end": null,
-      "meta": {"threshold": 1.0},
+      "meta": {"threshold": 42576000.0},
       "arrays": {
         "start": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
         "end": {"dtype": "float64", "length": 0, "data": "H4sIAAAAAAAA/wMAAAAA..."},
@@ -1066,6 +1085,13 @@ length 0:
   ]
 }
 ```
+
+To get a percent of the stimulation limit, divide a value `v` of `pns_total`
+or of `pns_above_0` by `meta["threshold"]` of `pns_above_0` and multiply by
+100: `100 * v / meta["threshold"]`. That is `100 * v / abs(gamma)`, with the
+gamma of the target. A JSON result written with 0.1.0rc4 still reads (the
+format is 1), but its PNS values are fractions of the limit, with the unit
+`"1"`, and its threshold series is `pns_above_1`.
 
 With `--analysis gradient.spectrum`, the same command has this item. The
 series `gradient_spectrum` is `SAMPLES`: the spectrum of the gradient
@@ -1279,7 +1305,7 @@ it uses in `CheckSpec.analyses`.
   keeps the exception and raises it again for each caller. Thus the rules that
   share an analysis get the same error, and `compute` runs one time.
 - **The arguments come from the target.** An analysis has parameters
-  (`AnalysisSpec.params`), for example `gamma`. pulseq-checks gives their
+  (`AnalysisSpec.params`), for example `hardware`. pulseq-checks gives their
   values from the target with a *binding* (the table below). `ctx.analysis`
   calls `compute(ctx.sequence, **arguments)`.
 - **`LookupError`.** `ctx.analysis(id)` raises `LookupError`, with the reason,
@@ -1298,11 +1324,11 @@ it uses in `CheckSpec.analyses`.
   value from the same context, so a rule and a requested analysis share one
   compute.
 
-[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#6-analyses-the-analyses-and-their-registry)
+[The usage document of pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#6-analyses-the-analyses-and-their-registry)
 gives the registry of analyses, and the fields of each value are in [its
-sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#1-seq_index-the-block-table)
+sections 1 to 3](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#1-seq_index-the-block-table)
 and [its section
-7](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md#7-grad_spectrum-the-gradient-spectrum).
+7](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md#7-grad_spectrum-the-gradient-spectrum).
 
 ### The analyses of this package
 
@@ -1311,17 +1337,22 @@ The bindings of version 1 are in `pulseq_checks.bindings.BINDINGS`:
 | Analysis | Value | Inputs and models | Arguments of `compute` |
 |---|---|---|---|
 | `seq.index` | The block table of the sequence (`sequence_index`) | None | None |
-| `gradient.limits` | The peaks over the whole file (`gradient_limits`) | None | `gamma`: the gamma of the target |
-| `gradient.blocks` | The gradient values of each block (`block_gradient_values`) | None | `gamma`: the gamma of the target |
-| `pns.safe.levels` | The SAFE PNS levels (`pns_levels_for`) | Model `pns.safe` | `hardware=(hw_from_dict(params), label)` and `thresholds=(PNS_LIMIT,)` |
+| `gradient.limits` | The peaks over the whole file (`gradient_limits`) | None | None |
+| `gradient.blocks` | The gradient values of each block (`block_gradient_values`) | None | None |
+| `pns.safe.levels` | The SAFE PNS levels (`pns_levels_for`) | Model `pns.safe` | `hardware=(hw_from_dict(params), label)` and `thresholds_hz_per_t=(pns_threshold_hz_per_t(ctx),)` |
 
-- The gamma of the target is the gamma of its `Opts` (`TargetProfile.make_opts()`),
-  so that the value and the limit of a gradient check are in the same units.
-  For a `Sequence` object with `limits_source` `"sequence object"` it is
-  `seq.system.gamma`.
+- `gamma(ctx)` in `pulseq_checks.bindings` is the signed gamma of the target:
+  the gamma of its `Opts` (`TargetProfile.make_opts()`), or `seq.system.gamma`
+  for a `Sequence` object with `limits_source` `"sequence object"`. No analysis
+  uses it. The checks convert the Hz values of the analyses with
+  `gamma_magnitude(ctx)`, which is `abs(gamma(ctx))`, so that the value and the
+  limit of a check are in the same units. `pns_threshold_hz_per_t(ctx)` is
+  `PNS_LIMIT * gamma_magnitude(ctx)`, the stimulation limit in Hz/T. A plugin
+  uses these functions to have the same gamma as the checks.
 - `params` is `ctx.profile.models["pns.safe"]` and `hw_from_dict` is in
   `pulseq_checks.safe_model`. `label` is `params.get("name")`, or the source
-  of the model if it has no name. `PNS_LIMIT` is in `pulseq_analysis.pns_levels`.
+  of the model if it has no name. `PNS_LIMIT` (a fraction, 1.0) is in
+  `pulseq_analysis.pns_levels`.
   The analysis also uses the rasters `GradientRasterTime` and
   `BlockDurationRaster`.
 - `gradient.spectrum` (the gradient spectrum of the whole sequence,
@@ -1330,7 +1361,7 @@ The bindings of version 1 are in `pulseq_checks.bindings.BINDINGS`:
   gives `GradientRasterTime` and `BlockDurationRaster`, and it uses the
   defaults of pypulseq (`max_frequency_hz=2000.0`, `window_s=0.05`,
   `frequency_oversampling=3.0`). Its values are in Hz/m/sqrt(Hz), with no
-  gamma: multiply them by `1e3 / gamma` (gamma in Hz/T) to get
+  gamma: multiply them by `1e3 / abs(gamma)` (gamma in Hz/T) to get
   mT/m/sqrt(Hz).
 - An analysis that has no binding here (for example the analysis of another
   package) is available only when it has no parameters. Then `compute` gets
@@ -1490,7 +1521,7 @@ pulseq-analysis. It is a dependency of pulseq-checks. A check gets a value
 through an analysis of pulseq-analysis (`ctx.analysis`, [section
 7](#using-an-analysis)). A plugin can use the modules too, and pulseq-reports
 uses them for its plots. The [usage document of
-pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc4/docs/usage.md)
+pulseq-analysis](https://github.com/mdtisdall/pulseq-analysis/blob/v0.1.0rc5/docs/usage.md)
 gives the interface of the modules: the names, the fields of each value, the
 units and the rules for the times and the block IDs.
 
@@ -1508,8 +1539,9 @@ These rules are about the checks:
   `pns.safe.levels` also use them.
   Then the run function gives "not evaluated" when neither the file nor the
   target gives a raster.
-- **Gamma.** The measurements have a default gamma. The binding of an analysis
-  passes the gamma of the target instead.
+- **Gamma.** The analyses use no gamma: their values are in Hz/m, Hz/m/s and
+  Hz/T. The checks convert them with `gamma_magnitude(ctx)`, the magnitude of
+  the gamma of the target, and a negative gamma is valid.
 - **Hardware.** The binding of `pns.safe.levels` passes the SAFE hardware of
   the target to `pns_levels_for`. It never uses the example hardware of
   pypulseq.
@@ -1525,13 +1557,12 @@ To use the PNS of a target in a plugin, ask for the analysis `pns.safe.levels`,
 as `pns.safe` does. The binding gives the hardware of the target, so the plugin
 and `pns.safe` share one run of the SAFE model. The spec of the plugin lists
 `"pns.safe"` in `models` and `"pns.safe.levels"` in `analyses`. The intervals
-at or above the limit are `levels.above[PNS_LIMIT]`, with `PNS_LIMIT` from
-`pulseq_analysis.pns_levels`:
+at or above the limit are `levels.above[pns_threshold_hz_per_t(ctx)]`, with
+the function from `pulseq_checks.bindings`. The PNS values are in Hz/T:
 
 ```python
-from pulseq_analysis.pns_levels import PNS_LIMIT
-
 from pulseq_checks import CheckSpec, Result, RunContext, State
+from pulseq_checks.bindings import pns_threshold_hz_per_t
 
 
 class _PnsIntervals:
@@ -1550,15 +1581,18 @@ class _PnsIntervals:
 
     def run(self, ctx: RunContext) -> Result:
         levels = ctx.analysis("pns.safe.levels")
-        count = len(levels.above[PNS_LIMIT])
+        count = len(levels.above[pns_threshold_hz_per_t(ctx)])
         state = State.PASS if count == 0 else State.FAIL
         return ctx.result(self.spec, state, value=float(count), limit=0.0)
 ```
 
 The binding calls `pns_levels_for` with `hardware=(hw_from_dict(params), label)`
-and `thresholds=(PNS_LIMIT,)`, where `params` is the model `pns.safe` of the
-target. A rule that calls `pns_levels_for` itself with other hardware or other
-thresholds does not share the run. To make the same call in your own code, see
+and `thresholds_hz_per_t=(pns_threshold_hz_per_t(ctx),)`, where `params` is the
+model `pns.safe` of the target. A plugin that reports a percent of the limit
+divides a value in Hz/T by `gamma_magnitude(ctx)` (from
+`pulseq_checks.bindings`) and multiplies by 100. A rule that calls
+`pns_levels_for` itself with other hardware or other thresholds does not share
+the run. To make the same call in your own code, see
 [the full value](#analysisresult-and-analysisstate).
 
 ## 9. Limits of version 1

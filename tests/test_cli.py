@@ -707,7 +707,7 @@ def test_analysis_writes_the_result_with_its_series_in_the_json(monkeypatch, seq
     )
     names = [series["name"] for series in analysis["series"]]
     assert "pns_total" in names
-    assert "pns_above_1" in names
+    assert "pns_above_0" in names
     assert "results: no check ran" in captured.err
 
 

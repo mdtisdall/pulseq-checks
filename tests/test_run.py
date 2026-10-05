@@ -800,9 +800,12 @@ def test_a_requested_analysis_gives_its_series_with_no_check(seq_file):
     seq = pp.Sequence(system=profile.make_opts())
     seq.read(str(seq_file))
     hardware = (hw_from_dict(safe_params()), "MP_GPA_EXAMPLE")
-    levels = pns_levels_for(seq, hardware=hardware, thresholds=(PNS_LIMIT,))
+    threshold = PNS_LIMIT * abs(profile.make_opts().gamma)  # Hz/T
+    levels = pns_levels_for(seq, hardware=hardware, thresholds_hz_per_t=(threshold,))
     expected = PNS_SAFE_LEVELS.to_series(levels)
-    assert [s.name for s in expected] == ["pns_total", "pns_above_1"]
+    assert [s.name for s in expected] == ["pns_total", "pns_above_0"]
+    assert [s.unit for s in expected] == ["Hz/T", "Hz/T"]
+    assert expected[1].meta["threshold"] == threshold
     assert result.series == expected
     assert matrix.analysis("a", "pns.safe.levels") is result
     assert matrix.exit_status() == 0

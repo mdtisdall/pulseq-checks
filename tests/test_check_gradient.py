@@ -7,9 +7,9 @@ import pypulseq as pp
 import pytest
 from pulseq_analysis.analyses import GRADIENT_BLOCKS, GRADIENT_LIMITS
 from pulseq_analysis.grad_limits import AxisResult, GradientLimits
-from pulseq_analysis.seq_utils import GAMMA
 from pypulseq.event_lib import EventLibrary
 from synthetic import (
+    GAMMA,
     RASTER_4US_JUNCTION,
     RASTER_4US_JUNCTION_TIME,
     SYSTEM,
@@ -339,13 +339,18 @@ def test_a_value_of_0_has_no_location(check):
 @pytest.mark.parametrize("check", CHECKS[::2], ids=["amplitude", "any-orientation"])
 def test_a_value_with_no_block_has_a_location_with_the_time_only(monkeypatch, check):
     """The measurement can give a value above 0 and no block. The location has the time and
-    no block ID."""
-    axes = {a: AxisResult(5.0, 0.25, None, 50.0, 0.125, None, 1.0) for a in "xyz"}
+    no block ID. The hand-made measurement is in Hz/m and Hz/m/s: 5 mT/m and 50 T/m/s with the
+    gamma of the profile (the default of pp.Opts)."""
+    peak_hz_per_m = 5.0 * GAMMA / 1e3
+    axes = {
+        a: AxisResult(peak_hz_per_m, 0.25, None, 50.0 * GAMMA, 0.125, None, GAMMA / 1e3)
+        for a in "xyz"
+    }
     measured = GradientLimits(
         reason=None,
         range_s=(0.0, 1.0),
         axes=axes,
-        vector_peak_mt_per_m=5.0,
+        vector_peak_hz_per_m=peak_hz_per_m,
         vector_peak_time_s=0.25,
         vector_peak_block=None,
     )
@@ -438,8 +443,8 @@ def test_rise_time_without_max_grad_gives_not_evaluated_for_the_slew(monkeypatch
 
 
 def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp_path):
-    """`gradient_limits` runs one time for each target, over the whole file, with the gamma
-    of the target only, and the rules compare with the hardware limits of the target."""
+    """`gradient_limits` runs one time for each target, over the whole file, with no
+    argument (no gamma), and the rules compare with the hardware limits of the target."""
     install(monkeypatch, *CHECKS)
     calls = spy_on_gradient_limits(monkeypatch)
     seen = spy_on_hardware_limits(monkeypatch)
@@ -453,8 +458,7 @@ def test_the_three_checks_share_one_measurement_for_each_target(monkeypatch, tmp
     assert {r.state for r in matrix.results} == {State.PASS}
     assert len(calls) == 2
     assert set(seen) == {t.hardware_limits for t in targets}
-    assert all(call.keys() == {"gamma"} for call in calls)
-    assert [call["gamma"] for call in calls] == [GAMMA, GAMMA]
+    assert calls == [{}, {}]
 
 
 def test_the_three_checks_of_one_target_call_gradient_limits_one_time(monkeypatch):
@@ -548,6 +552,86 @@ def test_a_profile_with_another_gamma_compares_value_and_limit_with_that_gamma(
     assert result.value == pytest.approx(value, rel=1e-4)
     assert result.limit == pytest.approx(20.0 if unit == "mT/m" else 200.0)
     assert result.unit == unit
+
+
+@pytest.mark.parametrize("check", CHECKS, ids=[c.spec.id for c in CHECKS])
+def test_a_negative_gamma_gives_the_results_of_its_magnitude(monkeypatch, tmp_path, check):
+    """A negative gamma is valid: one `.seq` file (fixed Hz/m values) read with a profile with
+    -40 MHz/T gives the results that it gives with 40 MHz/T, findings too. The values and the
+    limits are magnitudes, so they are not negative."""
+    install(monkeypatch, check)
+    system = pp.Opts(
+        max_grad=100, grad_unit="mT/m", max_slew=1000, slew_unit="T/m/s", gamma=GAMMA_40
+    )
+    gx = pp.make_trapezoid(
+        channel="x", amplitude=21e-3 * GAMMA_40, rise_time=RISE, flat_time=FLAT, system=system
+    )
+    path = tmp_path / "gamma40.seq"
+    build((gx,), system=system).write(str(path))
+
+    positive, negative = (
+        run_checks(path, [make_profile(max_grad=20.0, max_slew=200.0, gamma=g)]).results[0]
+        for g in (GAMMA_40, -GAMMA_40)
+    )
+
+    assert negative.state is State.FAIL
+    assert negative.value > 0
+    assert negative.limit > 0
+    assert (negative.state, negative.value, negative.limit, negative.location) == (
+        positive.state,
+        positive.value,
+        positive.limit,
+        positive.location,
+    )
+    assert negative.findings == positive.findings
+
+
+@pytest.mark.parametrize(
+    ("key", "limit", "check_id"),
+    [("max_grad", 30.0, "gradient.amplitude.axis"), ("max_slew", 300.0, "gradient.slew.axis")],
+)
+def test_the_one_limit_of_a_profile_with_a_negative_gamma_is_positive(
+    monkeypatch, key, limit, check_id
+):
+    """A profile with one limit and no `HardwareLimits` gets its limit from its `pp.Opts`
+    (`_hardware_limits`), converted with the magnitude of the gamma."""
+    install(monkeypatch, *CHECKS)
+
+    matrix = run_checks(peak_sequence(), [make_profile(**{key: limit}, gamma=-GAMMA_40)])
+
+    result = {r.check_id: r for r in matrix.results}[check_id]
+    assert result.state is State.PASS
+    assert result.limit == pytest.approx(limit)
+
+
+def test_limits_from_sequence_with_a_negative_gamma_give_the_results_of_its_magnitude(
+    monkeypatch,
+):
+    """`seq.system` has -40 MHz/T, and the trapezoid amplitude comes from 20 mT/m through that
+    gamma, so it is negative in Hz/m. The values and the limits are the magnitudes of the test
+    with 40 MHz/T: 20 mT/m and 100 T/m/s, with the limits 28 mT/m and 150 T/m/s."""
+    install(monkeypatch, *CHECKS)
+    system = pp.Opts(
+        max_grad=28, grad_unit="mT/m", max_slew=150, slew_unit="T/m/s", gamma=-GAMMA_40
+    )
+    gx = pp.make_trapezoid(
+        channel="x", amplitude=20e-3 * -GAMMA_40, rise_time=200e-6, flat_time=400e-6, system=system
+    )
+    seq = build((gx,), system=system)
+
+    matrix = run_checks(seq, [make_profile()], limits_from_sequence=True)
+
+    results = {r.check_id: r for r in matrix.results}
+    assert {r.state for r in results.values()} == {State.PASS}
+    for check_id, value, limit in [
+        ("gradient.amplitude.axis", 20.0, 28.0),
+        ("gradient.slew.axis", 100.0, 150.0),
+        ("gradient.amplitude.any-orientation", 20.0, 28.0),
+    ]:
+        assert (results[check_id].value, results[check_id].limit) == (
+            pytest.approx(value),
+            pytest.approx(limit),
+        ), check_id
 
 
 def test_a_rotation_gives_error_for_the_three_checks(monkeypatch):
@@ -815,7 +899,7 @@ def test_a_fail_measures_the_blocks_one_time_for_each_target_and_does_not_change
     again = check.run(ctx)
 
     assert len(calls) == 1
-    assert calls[0] == {"gamma": GAMMA}
+    assert calls[0] == {}
     assert result.findings == again.findings
     # The value, the limit, the location and the reason are the ones that the same run gives
     # for a limit that this sequence does not reach (the measurement does not change).

@@ -45,9 +45,10 @@ class ProfileError(CheckRunError):
 class HardwareLimits:
     """The gradient hardware limits that a sequence is compared with.
 
-    `max_grad_mt_per_m` is in mT/m and `max_slew_t_per_m_per_s` in T/m/s. `label` names
-    the limits: the name of a target profile, or "sequence object" (the limits of
-    `seq.system`, decision 4).
+    `max_grad_mt_per_m` is in mT/m and `max_slew_t_per_m_per_s` in T/m/s. Both are
+    magnitudes, converted from the Hz/m and Hz/m/s of `pp.Opts` with the magnitude of gamma (a
+    negative gamma is valid). `label` names the limits: the name of a target profile, or
+    "sequence object" (the limits of `seq.system`, decision 4).
     """
 
     max_grad_mt_per_m: float
@@ -338,8 +339,8 @@ def read_profile(path: str | Path) -> TargetProfile:
         built = profile.make_opts()
         if profile.has_value("opts.max_grad") and profile.has_value("opts.max_slew"):
             limits = HardwareLimits(
-                max_grad_mt_per_m=built.max_grad / built.gamma * 1e3,
-                max_slew_t_per_m_per_s=built.max_slew / built.gamma,
+                max_grad_mt_per_m=built.max_grad / abs(built.gamma) * 1e3,
+                max_slew_t_per_m_per_s=built.max_slew / abs(built.gamma),
                 label=name,
             )
             profile = replace(profile, hardware_limits=limits)

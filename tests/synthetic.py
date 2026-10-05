@@ -4,7 +4,9 @@ import math
 
 import numpy as np
 import pypulseq as pp
-from pulseq_analysis.seq_utils import GAMMA
+
+# The gamma of 1H, in Hz/T: the default of pp.Opts. pulseq-analysis has no gamma since 0.1.0rc5.
+GAMMA = 42.576e6
 
 SYSTEM = pp.Opts(
     max_grad=28,

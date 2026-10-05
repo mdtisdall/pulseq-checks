@@ -3,9 +3,11 @@ needs from the target, and the keyword arguments of its `compute`.
 
 `analyses.registry()` of pulseq-analysis gives the analyses, and each one has a
 `spec.params`, the names of the arguments of `compute`. pulseq-checks gives their values
-from the target. `BINDINGS` has one `Binding` for each analysis of pulseq-analysis that needs
-a value of the target. An analysis that has no binding here is available only when its
-`spec.params` is empty (`unavailable`). `RunContext.analysis` and `run_checks` use the
+from the target. `BINDINGS` has one `Binding` for each analysis of pulseq-analysis except
+`gradient.spectrum`; the binding of an analysis that needs no value of the target is
+`Binding()`. No analysis takes a gamma: the checks convert with `gamma_magnitude`. An
+analysis that has no binding here is available only when its `spec.params` is empty
+(`unavailable`). `RunContext.analysis` and `run_checks` use the
 bindings."""
 
 from __future__ import annotations
@@ -41,15 +43,27 @@ class Binding:
 
 
 def gamma(ctx: RunContext) -> float:
-    """The gamma, in Hz/T, of the measurements of the target of `ctx`: the same gamma as the
-    limits of the gradient checks, so that value and limit are in the same units."""
+    """The gamma, in Hz/T, of the target of `ctx`: `seq.system.gamma` when the gradient limits
+    come from the sequence object, else the gamma of the `Opts` of the profile. It is the
+    gamma that converts the gradient limits. It is signed, and a negative gamma is valid. No
+    analysis uses it: to convert a value of an analysis, use `gamma_magnitude`."""
     if ctx.limits_source == "sequence object":
         return ctx.sequence.system.gamma
     return ctx.profile.make_opts().gamma
 
 
-def _gradient_arguments(ctx: RunContext) -> dict[str, Any]:
-    return {"gamma": gamma(ctx)}
+def gamma_magnitude(ctx: RunContext) -> float:
+    """`abs(gamma(ctx))`, in Hz/T. Each limit of a check (max_grad, max_slew, the PNS
+    stimulation limit) and each value that a check compares with it is a magnitude, so the
+    checks convert the Hz values of the analyses with the magnitude of the gamma."""
+    return abs(gamma(ctx))
+
+
+def pns_threshold_hz_per_t(ctx: RunContext) -> float:
+    """The PNS stimulation limit of the target of `ctx`, in Hz/T: `PNS_LIMIT` (a fraction)
+    times `gamma_magnitude(ctx)`. The binding of `pns.safe.levels` gives it as the one
+    threshold, and a check indexes `PnsLevels.above` with this same float."""
+    return PNS_LIMIT * gamma_magnitude(ctx)
 
 
 def _pns_safe_arguments(ctx: RunContext) -> dict[str, Any]:
@@ -57,13 +71,16 @@ def _pns_safe_arguments(ctx: RunContext) -> dict[str, Any]:
     the label of the source of the model, and the stimulation limit as the one threshold."""
     params = ctx.profile.models["pns.safe"]
     label = params.get("name") or ctx.profile.sources["models.pns.safe"]
-    return {"hardware": (hw_from_dict(params), label), "thresholds": (PNS_LIMIT,)}
+    return {
+        "hardware": (hw_from_dict(params), label),
+        "thresholds_hz_per_t": (pns_threshold_hz_per_t(ctx),),
+    }
 
 
 BINDINGS: Mapping[str, Binding] = {
     "seq.index": Binding(),
-    "gradient.limits": Binding(arguments=_gradient_arguments),
-    "gradient.blocks": Binding(arguments=_gradient_arguments),
+    "gradient.limits": Binding(),
+    "gradient.blocks": Binding(),
     "pns.safe.levels": Binding(models=("pns.safe",), arguments=_pns_safe_arguments),
 }
 
