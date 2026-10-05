@@ -3,16 +3,26 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
-## Unreleased
+## 0.1.0rc5 (2026-10-04)
 
-pulseq-analysis is `0.1.0rc5`. No value of pulseq-analysis uses a gamma
+The fifth release candidate. pulseq-analysis is `0.1.0rc5`. No value of pulseq-analysis uses a gamma
 now: the gradient values are in Hz/m and Hz/m/s, and the PNS values are in
 Hz/T. The checks convert them with the magnitude of the gamma of the target.
 The results of the checks do not change, except in two cases: a target with
 a negative gamma (see "Fixed"), and `pns.safe` of a `Sequence` object whose
 `seq.system.gamma` is not the gamma of the profile (see "Changed"). The JSON
 result format stays 1, and the version of each check and analysis stays 1.
-The plan is `docs/plans/pulseq-analysis-rc5.md`.
+The plan is `docs/plans/pulseq-analysis-rc5.md` (#54, #55).
+
+The time budget before the tag (`scripts/budget.py`, 10^6 blocks, Apple M1
+Max, with the read of the file, 3.55 s; the profile has the resonances of
+`tests/profiles/prisma.toml`): the fast checks together take 4.27 s
+(budget: 10 s; 4.27 s in `0.1.0rc4`), `acoustic.resonance-energy` takes
+17.37 s (16.38 s), `pns.safe` takes 14.05 s, and all seven checks take
+37.18 s (36.88 s). With `analyses=["pns.safe.levels"]` they take 37.08 s
+(36.63 s), and the JSON result is 0.05 MB. The budget has one target, so it
+does not show the second run of the SAFE model that two targets with the
+same SAFE hardware and different gammas now cause.
 
 ### Added
 
