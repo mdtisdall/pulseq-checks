@@ -573,6 +573,24 @@ def test_the_hardware_limits_use_the_gamma_of_the_opts_object(write_json):
     assert other.make_opts().max_grad != default.make_opts().max_grad
 
 
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"max_grad": 80, "grad_unit": "mT/m", "max_slew": 200, "slew_unit": "T/m/s"},
+        {"max_grad": 8e4 * 42.576, "max_slew": 200 * 42.576e6},
+    ],
+    ids=["mT/m and T/m/s", "Hz/m and Hz/m/s"],
+)
+def test_the_hardware_limits_of_a_negative_gamma_are_positive(write_json, data):
+    """A negative gamma is valid. pp.Opts keeps the limits as magnitudes in Hz/m, and the
+    profile converts them with the magnitude of the gamma, so the limits are positive."""
+    profile = read_profile(write_json({**BASE, "opts": {**data, "gamma": -42.576e6}}))
+
+    assert profile.make_opts().gamma == -42.576e6
+    assert profile.hardware_limits.max_grad_mt_per_m == pytest.approx(80)
+    assert profile.hardware_limits.max_slew_t_per_m_per_s == pytest.approx(200)
+
+
 @pytest.mark.parametrize("given", ["max_grad", "max_slew"])
 def test_hardware_limits_need_both_max_grad_and_max_slew(write_json, given):
     path = write_json({**BASE, "opts": {given: 10, "B0": 3.0}})

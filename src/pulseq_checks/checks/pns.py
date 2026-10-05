@@ -4,11 +4,14 @@ of samples at or above 100 % as a finding (`PnsLevels.above`).
 
 The levels come from the analysis `pns.safe.levels` and the block index from `seq.index`, both
 of pulseq-analysis. `ctx.analysis` calculates each one time for each target, with the SAFE
-hardware of the target from the binding (`bindings.BINDINGS`)."""
+hardware of the target from the binding (`bindings.BINDINGS`). The PNS values of the analysis
+are in Hz/T, with no gamma: the check divides them by `gamma_magnitude(ctx)`. `PnsLevels.above`
+is keyed by the Hz/T threshold of the binding, `pns_threshold_hz_per_t(ctx)`."""
 
 import numpy as np
-from pulseq_analysis.pns_levels import NO_GRADIENTS, PNS_LIMIT, PnsInterval
+from pulseq_analysis.pns_levels import NO_GRADIENTS, PnsInterval
 
+from ..bindings import gamma_magnitude, pns_threshold_hz_per_t
 from ..results import Finding, Location, Result, State
 from ..rules import CheckPromise, CheckSpec, RunContext
 from ..safe_model import SAFE_MODEL
@@ -25,16 +28,23 @@ class _SafePns:
             "values of the three axes, each as a fraction of the stimulation limit of "
             "that axis. `pns_levels` calculates it with the SAFE model of the pinned "
             "pypulseq fork (`_safe_gwf_to_pns_chunk`, the chunk form of the model of "
-            "`calc_pns`) and the SAFE parameters of the target. The gradient is divided by "
-            "the gamma of seq.system. For a file, that is the gamma of the target (opts.gamma, "
-            "or 42.576 MHz/T, the value of pypulseq, when the profile does not give it)."
+            "`calc_pns`) and the SAFE parameters of the target. pulseq-analysis gives the "
+            "total in Hz/T, with no gamma (the model runs on the gradient in Hz/m), and the "
+            "check divides it by the magnitude of the gamma of the target: |opts.gamma|, or "
+            "42.576 MHz/T, the value of pypulseq, when the profile does not give it, or "
+            "|seq.system.gamma| when the limits come from the sequence object. For a Sequence "
+            "object with the limits from the profile, it is the gamma of the profile, not that "
+            "of seq.system. The gradient checks use the same gamma. A negative gamma is valid, "
+            "and the check uses its magnitude."
         ),
         inputs=(),
         models=("pns.safe",),
         limit="100 % of the stimulation limit.",
         tolerance=(
             "None: the rule of pypulseq, `pns_norm < 1` (decision 5 of the plan), with no "
-            "added tolerance."
+            "added tolerance. The check compares in Hz/T: it fails when the peak is at or "
+            "above the limit, 1 times the magnitude of gamma. That is the rule of pypulseq "
+            "without its division by gamma, and the rule of an interval of the findings."
         ),
         pass_condition=(
             "The peak is below 100 % of the stimulation limit. "
@@ -101,22 +111,29 @@ class _SafePns:
             return ctx.result(
                 self.spec, State.PASS, value=0.0, limit=100.0, unit="%", location=None, **model
             )
-        state = State.PASS if levels.peak < 1 else State.FAIL
+        # The state is decided in Hz/T, by the rule of `PnsLevels.above`: thus a fail has at
+        # least one finding, and a pass has none.
+        threshold = pns_threshold_hz_per_t(ctx)
+        g = gamma_magnitude(ctx)
+        state = State.FAIL if levels.peak_hz_per_t >= threshold else State.PASS
         return ctx.result(
             self.spec,
             state,
-            value=100 * levels.peak,
+            value=100 * levels.peak_hz_per_t / g,
             limit=100.0,
             unit="%",
             location=self._location(ctx, levels.peak_time_s),
-            findings=self._findings(ctx, levels.above[PNS_LIMIT]),
+            findings=self._findings(ctx, levels.above[threshold], g),
             **model,
         )
 
     @staticmethod
-    def _findings(ctx: RunContext, intervals: tuple[PnsInterval, ...]) -> tuple[Finding, ...]:
-        """One finding for each interval, in time order. The block of an interval is found
-        by the rule of `_location`, for all intervals in one call of `np.searchsorted`."""
+    def _findings(
+        ctx: RunContext, intervals: tuple[PnsInterval, ...], g: float
+    ) -> tuple[Finding, ...]:
+        """One finding for each interval, in time order, with its peak divided by `g`, the
+        magnitude of gamma, in Hz/T. The block of an interval is found by the rule of
+        `_location`, for all intervals in one call of `np.searchsorted`."""
         if not intervals:
             return ()
         index = ctx.analysis("seq.index")
@@ -126,7 +143,7 @@ class _SafePns:
         findings = []
         for interval, block in zip(intervals, block_ids, strict=True):
             start_s, end_s = float(interval.start_s), float(interval.end_s)
-            peak_percent = float(100 * interval.peak)
+            peak_percent = float(100 * interval.peak_hz_per_t / g)
             findings.append(
                 Finding(
                     code="PNS_ABOVE_LIMIT",

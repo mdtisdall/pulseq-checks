@@ -237,10 +237,12 @@ def _hardware_limits(
     if from_sequence and not (
         target.has_value("opts.max_grad") or target.has_value("opts.max_slew")
     ):
-        # pp.Opts stores max_grad in Hz/m and max_slew in Hz/m/s, whatever unit it was given.
+        # pp.Opts stores max_grad in Hz/m and max_slew in Hz/m/s, whatever unit it was given,
+        # as magnitudes for each sign of gamma. The limits are magnitudes, so they are
+        # converted with the magnitude of gamma, as the values of the checks are.
         limits = HardwareLimits(
-            max_grad_mt_per_m=seq.system.max_grad / seq.system.gamma * 1e3,
-            max_slew_t_per_m_per_s=seq.system.max_slew / seq.system.gamma,
+            max_grad_mt_per_m=seq.system.max_grad / abs(seq.system.gamma) * 1e3,
+            max_slew_t_per_m_per_s=seq.system.max_slew / abs(seq.system.gamma),
             label=LIMITS_FROM_SEQUENCE,
         )
         return LIMITS_FROM_SEQUENCE, limits

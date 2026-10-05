@@ -449,12 +449,15 @@ def _checks_pair(seq_path: str, limit_set: dict) -> dict:
         return _error_rows([dict(vars(e)) for e in errors])
 
     def axes():
+        # gradient_limits gives Hz/m and Hz/m/s, with no gamma. Convert with the magnitude of
+        # the gamma of the profile, as the checks do.
         measured = gradient_limits(read())
+        g = abs(profile.make_opts().gamma)
         return {
             "reason": measured.reason,
-            "peak_mt_per_m": {a: measured.axes[a].peak_mt_per_m for a in AXES},
-            "slew_t_per_m_per_s": {a: measured.axes[a].max_slew_t_per_m_per_s for a in AXES},
-            "vector_peak_mt_per_m": measured.vector_peak_mt_per_m,
+            "peak_mt_per_m": {a: measured.axes[a].peak_hz_per_m / g * 1e3 for a in AXES},
+            "slew_t_per_m_per_s": {a: measured.axes[a].max_slew_hz_per_m_per_s / g for a in AXES},
+            "vector_peak_mt_per_m": measured.vector_peak_hz_per_m / g * 1e3,
         }
 
     return {

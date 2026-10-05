@@ -754,6 +754,18 @@ with `gamma = 10e6`, and compares the limits and `make_opts().max_grad`.
 
 **Assumptions:** None.
 
+#### `test_the_hardware_limits_of_a_negative_gamma_are_positive`
+
+**Checks:** A negative gamma is valid. For a profile with `gamma` of -42.576 MHz/T and the
+limits 80 mT/m and 200 T/m/s, in mT/m and T/m/s or in Hz/m and Hz/m/s, `make_opts().gamma` keeps
+its sign and the limits of `hardware_limits` are 80 mT/m and 200 T/m/s, so they are positive.
+
+**How:** The test is parametrized over the two unit systems. It reads the profile and compares
+the gamma, and the two limits with `pytest.approx`.
+
+**Assumptions:** `pp.Opts` keeps the limits as magnitudes in Hz/m and Hz/m/s, and the profile
+converts them with the magnitude of the gamma.
+
 #### `test_hardware_limits_need_both_max_grad_and_max_slew`
 
 **Checks:** With only `max_grad` or only `max_slew`, `hardware_limits` is None.
@@ -2003,8 +2015,10 @@ threshold. `ResultMatrix.analysis(target, id)` gives that result, and the exit s
 **How:** The test writes `spin_echo_sequence()` to a `.seq` file and runs it for a target with
 the SAFE parameters of pypulseq's example hardware. It reads the file again with the `Opts` of
 the target, calls `pns_levels_for` with `hw_from_dict` of the parameters, the name of the
-parameters as the label, and the threshold `PNS_LIMIT`, and compares the series of the
-analysis result with `to_series` of that value (the series `pns_total` and `pns_above_1`).
+parameters as the label, and `thresholds_hz_per_t=(PNS_LIMIT * |gamma|,)`, and compares the
+series of the analysis result with `to_series` of that value. The series are `pns_total` and
+`pns_above_0`, both with the unit Hz/T, and the `threshold` in the meta of the second is the
+threshold in Hz/T.
 
 **Assumptions:** The test does not check the values of the series: pulseq-analysis tests them.
 The comparison shows that the run function gives the hardware, the label and the threshold of
@@ -2169,7 +2183,7 @@ first error as its cause. `run_checks` raises it.
 **How:** The test lists the IDs. It replaces `pulseq_analysis.analyses.registry` with a function
 that raises, and calls `registry.analyses()` and `run_checks`.
 
-**Assumptions:** The list of the five IDs is that of pulseq-analysis `v0.1.0rc4`: a newer
+**Assumptions:** The list of the five IDs is that of pulseq-analysis `v0.1.0rc5`: a newer
 version of that package with more analyses changes it.
 
 #### `test_check_rules_are_keyed_by_spec_id`
@@ -3221,8 +3235,9 @@ the value and that the location is None.
 amplitude rule and of the any-orientation rule has the time and the block None.
 
 **How:** The test replaces `compute` of the analysis `gradient.limits` with a function that
-gives a `GradientLimits` made by hand, with the peak 5 mT/m at 0.25 s and no block, and
-checks the value and that the location is `Location(block=None, time_s=0.25)`.
+gives a `GradientLimits` made by hand, in Hz/m and Hz/m/s: the peak 5 mT/m at 0.25 s and
+no block, and the slew 50 T/m/s, each times the gamma of the profile (the default of
+`pp.Opts`). It checks the value and that the location is `Location(block=None, time_s=0.25)`.
 
 **Assumptions:** A real measurement does not give this result, so the test uses a made
 result. It tests the rule of the check only.
@@ -3293,14 +3308,13 @@ for `gradient.slew.axis`, with `opts.max_slew` in the reason.
 
 **Checks:** For a `.seq` file and two targets, `compute` of `gradient.limits` runs one time for each
 target (two times for the three rules, not six), always over the whole file (no window)
-and with the gamma of that target only, and the rules compare with the hardware limits of
+and with no argument (no gamma), and the rules compare with the hardware limits of
 the targets.
 
 **How:** The test writes a `.seq` file, runs the three rules for two targets with
 different limits, the spy on `compute` of `gradient.limits` and the spy on
 `_hardware_limits`. It checks that all six results are "pass", that there are two calls,
-that the only keyword argument of each call is `gamma`, that the gamma is 42.576 MHz/T
-(the targets do not give `gamma`), and that the limits that the rules use are the
+that each call has no keyword argument, and that the limits that the rules use are the
 `hardware_limits` of the two targets.
 
 **Assumptions:** `run_checks` reads the file one time for each target (tested in
@@ -3362,6 +3376,44 @@ the amplitude would be 19.7 mT/m and the rules would pass.
 **Assumptions:** `run_checks` reads the file with the `pp.Opts` of the target, so
 `seq.system.gamma` is 40 MHz/T. The tests of the other checks in this file give no `gamma`,
 and so test the default of 42.576 MHz/T (the value of pypulseq).
+
+#### `test_a_negative_gamma_gives_the_results_of_its_magnitude`
+
+**Checks:** A negative gamma is valid. For each of the three rules, a profile with `gamma` of
+-40 MHz/T gives the same state, value, limit, location and findings as one with 40 MHz/T, for a
+file with a 21 mT/m gradient and the limits 20 mT/m and 200 T/m/s. The result is a "fail", and
+its value and limit are positive.
+
+**How:** The test builds a `pp.Opts` with the gamma 40 MHz/T and an x trapezoid of
+21 mT/m with that gamma, writes the file to `tmp_path`, and runs each rule alone with
+`run_checks` for the two profiles. It compares the two results.
+
+**Assumptions:** The values of the `.seq` file are in Hz/m and do not depend on the sign of
+the gamma of the profile. The test is for one gamma magnitude.
+
+#### `test_the_one_limit_of_a_profile_with_a_negative_gamma_is_positive`
+
+**Checks:** A profile with only `max_grad` (30 mT/m) or only `max_slew` (300 T/m/s), no
+`HardwareLimits`, and `gamma` of -40 MHz/T gives the "pass" for its rule with the limit that
+the profile gave, so the limit is positive.
+
+**How:** The test is parametrized over the two limits. It runs the three rules on a peak
+sequence and checks the state and the limit (`pytest.approx`) of the rule of that limit.
+
+**Assumptions:** The limit comes from the `pp.Opts` of the profile (`_hardware_limits`).
+
+#### `test_limits_from_sequence_with_a_negative_gamma_give_the_results_of_its_magnitude`
+
+**Checks:** With `limits_from_sequence=True` and a `Sequence` object whose `system` has a gamma
+of -40 MHz/T, the three rules pass with the values 20 mT/m, 100 T/m/s and 20 mT/m and the
+limits 28 mT/m, 150 T/m/s and 28 mT/m, the values and limits of the same test with 40 MHz/T.
+
+**How:** The test builds a `pp.Opts` with the gamma -40 MHz/T and the limits 28 mT/m and
+150 T/m/s, and an x trapezoid of 20 mT/m (negative in Hz/m) with the rise time 200 µs. It runs
+the rules on a target that gives no value and checks the states, the values and the limits.
+
+**Assumptions:** `pp.Opts` stores the limits as magnitudes, so the limits are those that the
+test gave.
 
 #### `test_a_rotation_gives_error_for_the_three_checks`
 
@@ -3493,8 +3545,8 @@ first segment (the rise) is the steepest one.
 
 #### `test_a_fail_measures_the_blocks_one_time_for_each_target_and_does_not_change_the_result`
 
-**Checks:** A fail calls `compute` of `gradient.blocks` one time for each target, with the gamma
-that `gradient.limits` uses (the default 42.576 MHz/T for a profile without a gamma), and a second
+**Checks:** A fail calls `compute` of `gradient.blocks` one time for each target, with no
+argument (no gamma), and a second
 run of the rule on the same `RunContext` gives the same findings without a second call. The value,
 the location and the reason of the result are the ones that the rule gives for a limit that the
 sequence does not reach; the limit and the unit are those of the target.
@@ -3607,14 +3659,16 @@ reason that names `pns.safe`, and no value.
 #### `test_the_peak_against_the_stimulation_limit`
 
 **Checks:** With a large `limit_scale` the state is "pass", and with a small one it is
-"fail". The value is 100 times the peak of `pns_levels_for` with the same hardware, the
-limit is 100.0, the unit is `%`, the model is `pns.safe` with `SAFE_MODEL.version`, and
-the check ID and the specification version are those of the spec.
+"fail". The peak of `pns_levels_for` with the same hardware is below the threshold
+(`PNS_LIMIT * |gamma|`, in Hz/T) for a pass and not for a fail. The value is 100 times that
+peak divided by the gamma, the limit is 100.0, the unit is `%`, the model is `pns.safe` with
+`SAFE_MODEL.version`, and the check ID and the specification version are those of the spec.
 
 **How:** The test writes the `.asc` file and a profile that names it, reads the profile,
 and runs the check on a two-repetition gradient-echo `.seq` file. It compares the value
-exactly with 100 times the peak of `pns_levels_for` for the same file, read with the
-`Opts` of the profile as `run_checks` reads it, with `hardware` from the profile.
+exactly with `100 * peak_hz_per_t / gamma` of `pns_levels_for` for the same file, read with the
+`Opts` of the profile as `run_checks` reads it, with `hardware` from the profile and the
+threshold in Hz/T.
 
 **Assumptions:** The two scales are far from the limit, so the states do not depend on the
 rounding of the values in the file.
@@ -3678,8 +3732,8 @@ check with the failing scale.
 
 **Checks:** With the `GradientRasterTime` line removed and `rasters.GradientRasterTime` of 4 µs
 or 10 µs in the profile, the check is evaluated (a fail with the failing scale). The value is
-100 times the peak of `pns_levels_for` for the file read with the `Opts` of the profile, and
-the value for 4 µs is not the value for 10 µs.
+`100 * peak_hz_per_t / gamma` of `pns_levels_for` for the file read with the `Opts` of the
+profile, and the value for 4 µs is not the value for 10 µs.
 
 **How:** The test runs the check for each raster and compares the values with `expected_peak`,
 and the two values with each other.
@@ -3707,12 +3761,13 @@ raster (`dt` and the sample times); the test does not check the size of the diff
 
 #### `test_a_fail_gives_one_finding_for_each_interval_in_time_order`
 
-**Checks:** The failing case gives one finding for each interval of `above_limit` of
-`pns_levels_for` (same sequence, same SAFE parameters), in the same order. Each finding has
-the code `PNS_ABOVE_LIMIT`, the time `start_s` of its interval and the block ID of the last
-block that starts at or before that time in its location, the five data values (`start_s`,
-`end_s`, `peak_percent` as 100 times the interval peak, `peak_time_s`, `num_samples`), and
-the message with the start, the end and the peak. The times of the locations do not
+**Checks:** The failing case gives one finding for each interval of `above[threshold]` of
+`pns_levels_for` (same sequence, same SAFE parameters, the threshold in Hz/T), in the same
+order. Each finding has the code `PNS_ABOVE_LIMIT`, the time `start_s` of its interval and
+the block ID of the last block that starts at or before that time in its location, the five
+data values (`start_s`, `end_s`, `peak_percent` as `100 * peak_hz_per_t / gamma` of the
+interval, `peak_time_s`, `num_samples`), and the message with the start, the end and the
+peak. The times of the locations do not
 decrease.
 
 **How:** The test runs the check on `gre_sequence(num_trs=2)` with the failing scale and
@@ -3735,8 +3790,8 @@ test.
 #### `test_the_value_and_the_location_of_the_result_do_not_change_with_the_findings`
 
 **Checks:** The largest `peak_percent` of the findings equals the value of the result. The
-value is 100 times the peak of `pns_levels_for`, the limit and unit are 100.0 and `%`, the
-location is the time `peak_time_s` and its block, and `reason` is None.
+value is `100 * peak_hz_per_t / gamma` of `pns_levels_for`, the limit and unit are 100.0
+and `%`, the location is the time `peak_time_s` and its block, and `reason` is None.
 
 **How:** The test runs the failing case and compares the result with `pns_levels_for` and
 `sequence_index`.
@@ -3749,11 +3804,11 @@ location is the time `peak_time_s` and its block, and `reason` is None.
 
 **Checks:** Two equal trapezoids on x with a 50 ms gap give two findings. They are in time
 order, and the code, the location and the times of each are those of the interval of
-`pns_levels_for` with the same number. The two findings have different blocks, and the end of
-the first is before the start of the second.
+`pns_levels_for` (`above[threshold]`) with the same number. The two findings have different
+blocks, and the end of the first is before the start of the second.
 
-**How:** The limit scale is the peak of one trapezoid with a scale of 1, divided by 1.02,
-so that only the larger hump of the total of a trapezoid is at or above 100 %. The test
+**How:** The limit scale is the peak of one trapezoid with a scale of 1, as a fraction (the
+peak in Hz/T divided by the gamma), divided by 1.02, so that only the larger hump of the total of a trapezoid is at or above 100 %. The test
 checks that one trapezoid gives one interval and that two trapezoids give two, then runs the
 check on the sequence of two. The scale is the peak divided by 1.02 because the peak is
 proportional to the inverse of the scale; the test checks the number of intervals, not that
@@ -3761,6 +3816,57 @@ proportion.
 
 **Assumptions:** The decay of the filters after a trapezoid does not keep the total at or
 above 100 % until the second trapezoid.
+
+#### `test_the_state_is_decided_in_hz_per_t_by_the_rule_of_the_findings`
+
+**Checks:** A peak exactly at the threshold of the binding (in Hz/T), with its interval in
+`above`, gives "fail" with one finding. A peak one float below the threshold, with no interval,
+gives "pass" with no finding. The value is 100 times the peak divided by the gamma. The state
+and the findings agree.
+
+**How:** The test is parametrized over the two cases. It replaces `compute` of the analysis
+`pns.safe.levels` with a function that gives the real `PnsLevels` with the peak and the
+intervals changed (`math.nextafter` for the peak below the threshold), runs the check and
+compares the state, the number of findings and the value.
+
+**Assumptions:** The test uses a made result: it tests the rule of the check only, that the
+check compares in Hz/T by the rule of `PnsLevels.above`, and not in percent.
+
+#### `test_a_profile_with_another_gamma_converts_with_that_gamma`
+
+**Checks:** The model gives the same peak in Hz/T for a profile with `gamma` of 40 MHz/T as for
+one without a gamma (42.576 MHz/T). The value of the check is that peak divided by the gamma of
+the profile, so the value for 40 MHz/T is 42.576 / 40 times the value for 42.576 MHz/T.
+
+**How:** The test runs the check on a `.seq` file for the two profiles with the failing scale,
+and compares the values with `100 * peak_hz_per_t / gamma` and with each other.
+
+**Assumptions:** The test does not check the SAFE model: the peak in Hz/T is the same for the
+two profiles because the model does not use the gamma.
+
+#### `test_a_negative_gamma_gives_the_results_of_its_magnitude`
+
+**Checks:** A negative gamma is valid. A profile with `gamma` of -40 MHz/T gives the same state,
+value, location and findings as one with 40 MHz/T. The result is a "fail" and its value is
+positive.
+
+**How:** The test runs the check on a `.seq` file for the two profiles with the failing scale
+and compares the results.
+
+**Assumptions:** The PNS values and the limit are magnitudes.
+
+#### `test_a_sequence_object_uses_the_gamma_of_the_gradient_checks`
+
+**Checks:** (D5 of `docs/plans/pulseq-analysis-rc5.md`.) For a `Sequence` object whose `system`
+has 40 MHz/T and a profile with no gamma (42.576 MHz/T), the value is `100 * peak_hz_per_t`
+divided by the gamma of the profile, and with `limits_from_sequence=True` it is divided by the
+gamma of `seq.system`.
+
+**How:** The test builds the sequence, sets its gamma, computes the peak with `pns_levels_for`
+and runs the check two times, with the limits of the profile and with the limits of the
+sequence object. It compares the two values.
+
+**Assumptions:** The peak in Hz/T does not depend on the gamma.
 
 #### `test_the_spec_has_the_findings_text`
 
@@ -4252,7 +4358,7 @@ wrapper that the build backend writes does that.
 **Checks:** `--analysis pns.safe.levels --json -` with the Prisma profile and no check rule
 gives status 0 and a JSON result with no check result and one analysis result for
 `pns.safe.levels`, target "Prisma AS82", state "done", whose series include `pns_total` and
-`pns_above_1`. The summary on the standard error says "results: no check ran".
+`pns_above_0`. The summary on the standard error says "results: no check ran".
 
 **How:** The test installs no check rule, runs `main` on the synthetic spin-echo file, and
 reads the standard output with `json.loads`.
@@ -4345,10 +4451,10 @@ parameters and compares the key sets with those of its analysis.
 
 **Assumptions:** None.
 
-#### `test_the_bindings_of_the_gradient_analyses_give_the_gamma_of_the_target`
+#### `test_the_gamma_is_the_gamma_of_the_profile_and_the_gradient_analyses_take_no_argument`
 
-**Checks:** For a target with `opts.gamma`, `gamma(ctx)` and the arguments of `gradient.limits`
-and `gradient.blocks` are that gamma.
+**Checks:** For a target with `opts.gamma`, `gamma(ctx)` is that gamma, and the arguments of
+`gradient.limits` and `gradient.blocks` are `{}`: the analyses take no gamma.
 
 **How:** The test makes the context for a target with a gamma that is not the pypulseq default
 and compares the values.
@@ -4358,10 +4464,9 @@ and compares the values.
 #### `test_the_gamma_of_a_sequence_object_with_the_limits_from_it_is_the_gamma_of_the_sequence`
 
 **Checks:** For a `Sequence` object whose gamma is not that of the profile, with
-`limits_source == "sequence object"`, `gamma(ctx)` and the arguments of both gradient bindings
-are the gamma of `seq.system` (decision P3). `ctx.analysis("gradient.limits")` is
-`gradient_limits(seq, gamma=<that gamma>)` and is not the value for the gamma of the profile.
-With the limits of the profile, the gamma is that of the profile.
+`limits_source == "sequence object"`, `gamma(ctx)` is the gamma of `seq.system` (decision P3),
+and the arguments of both gradient bindings are `{}`. `ctx.analysis("gradient.limits")` is `gradient_limits(seq)`. With the
+limits of the profile, the gamma is that of the profile.
 
 **How:** The test builds a sequence with one trapezoid and a gamma of 43 MHz/T, and a profile
 with 40 MHz/T. It compares the values and the two calls of `gradient_limits`.
@@ -4371,13 +4476,26 @@ apart.
 
 #### `test_the_binding_of_pns_safe_levels_gives_the_safe_hardware_and_the_stimulation_threshold`
 
-**Checks:** The arguments of `pns.safe.levels` are `hardware` and `thresholds`. The hardware is
-the pair of `hw_from_dict` of the parameters of the model and the `name` of the model, and
-`thresholds` is `(PNS_LIMIT,)`, which is `(1.0,)`.
+**Checks:** The arguments of `pns.safe.levels` are `hardware` and `thresholds_hz_per_t`. The
+hardware is the pair of `hw_from_dict` of the parameters of the model and the `name` of the
+model, and `thresholds_hz_per_t` is `(pns_threshold_hz_per_t(ctx),)`, which is `(42.576e6,)`
+(`PNS_LIMIT`, which is 1.0, times the gamma of pypulseq).
 
 **How:** The test calls the function of the binding and compares the three values.
 
 **Assumptions:** None.
+
+#### `test_a_negative_gamma_is_signed_in_gamma_and_positive_in_its_magnitude_and_the_threshold`
+
+**Checks:** A negative gamma is valid. For a profile with a negative gamma, and for a
+`Sequence` object with a negative gamma and `limits_source == "sequence object"`, `gamma(ctx)`
+is negative, and `gamma_magnitude(ctx)` and `pns_threshold_hz_per_t(ctx)` are positive. The
+threshold is `PNS_LIMIT` times the magnitude.
+
+**How:** The test makes the two contexts and compares the three values for each.
+
+**Assumptions:** pulseq-analysis requires a threshold above 0, so the threshold uses the
+magnitude.
 
 #### `test_the_label_of_the_safe_hardware_is_the_source_of_the_model_without_a_name`
 

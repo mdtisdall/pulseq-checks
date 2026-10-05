@@ -3,6 +3,58 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
+## Unreleased
+
+pulseq-analysis is `0.1.0rc5`. No value of pulseq-analysis uses a gamma
+now: the gradient values are in Hz/m and Hz/m/s, and the PNS values are in
+Hz/T. The checks convert them with the magnitude of the gamma of the target.
+The results of the checks do not change, except in two cases: a target with
+a negative gamma (see "Fixed"), and `pns.safe` of a `Sequence` object whose
+`seq.system.gamma` is not the gamma of the profile (see "Changed"). The JSON
+result format stays 1, and the version of each check and analysis stays 1.
+The plan is `docs/plans/pulseq-analysis-rc5.md`.
+
+### Added
+
+- **`bindings.gamma_magnitude(ctx)`**, the magnitude of `gamma(ctx)`, in
+  Hz/T. The checks convert the values of the analyses with it. Each limit
+  and each value of a check is a magnitude, so a negative gamma is valid and
+  the checks use its magnitude. `gamma(ctx)` stays signed.
+- **`bindings.pns_threshold_hz_per_t(ctx)`**, the PNS stimulation limit of
+  the target in Hz/T: `PNS_LIMIT * gamma_magnitude(ctx)`. The binding of
+  `pns.safe.levels` gives it as the one threshold, and a check finds the
+  intervals at or above the limit in `levels.above[pns_threshold_hz_per_t(ctx)]`.
+
+### Changed
+
+- **pulseq-analysis `0.1.0rc5`** in place of `0.1.0rc4`. The series of
+  `pns.safe.levels` have the unit `"Hz/T"`: a PNS value is the fraction of
+  the stimulation limit times the magnitude of the gamma of the target. To
+  get a percent, use `100 * v / meta["threshold"]` of the threshold series,
+  which is `100 * v / abs(gamma)`. The threshold series is `pns_above_0` in
+  place of `pns_above_1`. A JSON result of `0.1.0rc4` with this series still
+  reads, because the format is 1, but its PNS values are fractions and its
+  threshold series is `pns_above_1`.
+- **The bindings.** `gradient.limits` and `gradient.blocks` take no
+  argument: they have no `gamma` parameter now. `pns.safe.levels` takes
+  `thresholds_hz_per_t=(pns_threshold_hz_per_t(ctx),)` in place of
+  `thresholds=(PNS_LIMIT,)`.
+- **`pns.safe` of a `Sequence` object** with the limits from the profile uses
+  the gamma of the profile, not `seq.system.gamma`, as the gradient checks
+  do. The value changes only when the two gammas are different. With
+  `limits_from_sequence=True`, it uses `seq.system.gamma`, as before.
+- **`pns.safe`** decides its state in Hz/T: it fails when the peak is at or
+  above `pns_threshold_hz_per_t(ctx)`, the rule of the intervals of its
+  findings. Thus a fail always has a finding.
+
+### Fixed
+
+- **A negative gamma.** The gradient checks divided by the signed gamma, so
+  a target with a negative gamma gave negative values and negative limits,
+  and the gradient checks failed. Now the values and the limits use the
+  magnitude of the gamma, and a negative gamma gives the results of its
+  magnitude. `pns.safe` was already correct for a negative gamma.
+
 ## 0.1.0rc4 (2026-10-04)
 
 The fourth release candidate. The new check `acoustic.resonance-energy`
