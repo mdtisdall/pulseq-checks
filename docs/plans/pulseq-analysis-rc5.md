@@ -3,9 +3,9 @@
 Mode: Strict STE100. Structural rules are enforced. Lexical rules are a
 direction of travel, not a verified dictionary match.
 
-Status: in progress (2026-10-04). PR 1 (this plan) is #54. PR 2 (the move,
-sections 3, 4 and 6.1) is on the branch `chore/pulseq-analysis-rc5`. PR 3
-(the release) is to do. The user approved the decisions D1 to D7 of section
+Status: done (2026-10-04). PR 1 (this plan) is #54. PR 2 (the move,
+sections 3, 4 and 6.1) is #55. PR 3 (the release `0.1.0rc5`) is on the
+branch `chore/release-0.1.0rc5`, and the tag is `v0.1.0rc5`. The user approved the decisions D1 to D7 of section
 5. Section 7 has the changes to this plan during the work.
 
 ## 1. Goal
