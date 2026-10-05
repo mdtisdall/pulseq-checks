@@ -3,6 +3,16 @@
 Each version of `pulseq-checks` has an entry here. The version numbers follow
 [PEP 440](https://peps.python.org/pep-0440/).
 
+## Unreleased
+
+### Removed
+
+- **`scripts/compare_with_cards.py`**, the one-time comparison of the checks
+  with the pulseq-reports cards (#16). pulseq-reports no longer has those
+  checks, and the reference worktree that the script needs does not exist
+  now. `docs/comparison.md` stays as the record of the comparison. The
+  package does not change.
+
 ## 0.1.0rc5 (2026-10-04)
 
 The fifth release candidate. pulseq-analysis is `0.1.0rc5`. No value of pulseq-analysis uses a gamma

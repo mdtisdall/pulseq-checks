@@ -9,6 +9,15 @@ Result: **the new checks and the cards agree on all 180 pairs** (9 sequences, 4
 limit sets, 5 pairs of a check and a card). One difference of rule cannot show
 in this set; the user accepted it (see [An accepted difference](#an-accepted-difference)).
 
+This is a record of a comparison that was done one time, in #16. It was the
+gate for the step 1 of pulseq-reports, which removed the checks of its cards
+(pulseq-reports #111) and now uses this package (pulseq-reports #112). The
+script `scripts/compare_with_cards.py` is removed from this repository: the
+reference worktree that it needs does not exist now, and no later work needs
+the comparison. The last version of the script is in the commit `778999b`
+(`git show 778999b:scripts/compare_with_cards.py`). The numbers below are from
+the run of #16.
+
 ## The reference
 
 - pulseq-reports at commit `475a1eb` ("docs: the pulseq-checks order of work
@@ -60,7 +69,9 @@ from `pns.pns_prediction`.
 
 ## The commands
 
-In this repository (the reference worktree must exist, see above):
+These are the commands of the run of #16. The script is not in the repository
+now (see the top of this document). In this repository at `778999b`, with the
+reference worktree (see above):
 
 ```bash
 nix develop --command uv run python scripts/compare_with_cards.py run OUT_DIR \
